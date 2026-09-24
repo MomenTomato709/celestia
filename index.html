@@ -1,34 +1,3716 @@
 <!DOCTYPE html>
-<html lang="es">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
-    <meta name="color-scheme" content="dark light" />
-    <meta name="theme-color" content="#0B0D17" />
-    <title>Celestia</title>
-    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
-    <link rel="manifest" href="manifest.webmanifest" />
-    <link rel="stylesheet" href="estilo.css" />
-  </head>
-  <body>
-    <header class="cabecera">
-      <span class="orbe" aria-hidden="true"></span>
-      <div class="titulo">
-        <h1 class="nombre">Celestia</h1>
-        <p class="pie-cabecera">visita</p>
-      </div>
-    </header>
+<!--
+  El chat de Celestia.
 
-    <main id="pantalla" class="pantalla"></main>
+  Una sola página, sin dependencias externas: ni CDN, ni fuentes remotas, ni
+  framework. Celestia vive en un móvil y a menudo sin datos, así que la interfaz
+  tiene que pintar un mensaje sin bajarse nada de internet.
 
-    <p id="aviso" class="aviso" role="alert" hidden></p>
+  La paleta, la geometría del logo y la tabla de estados NO están escritas aquí:
+  las inyecta `bp_chat.py` desde `celestia_lib/marca.py`, que es el mismo módulo
+  que dibuja el orbe en el terminal: busca los cuatro marcadores de comentario
+  (variables, geometria, estados y paleta) y los sustituye al servir la página.
+-->
+<html lang="es" data-tema="noche">
+<head>
+<meta name="celestia-pages" content="1">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<meta name="theme-color" content="#0B0D17">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/app/icono-192.png">
+<title>Celestia</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2032%2032%27%3E%3Cellipse%20cx%3D%2716%27%20cy%3D%2716%27%20rx%3D%2714.2%27%20ry%3D%275.4%27%20transform%3D%27rotate%28-24%2016%2016%29%27%20fill%3D%27none%27%20stroke%3D%27%238B7CF6%27%20stroke-width%3D%271.7%27%2F%3E%3Cpath%20d%3D%27M16%203.5Q16%2016%2028.5%2016Q16%2016%2016%2028.5Q16%2016%203.5%2016Q16%2016%2016%203.5Z%27%20fill%3D%27%23A78BFA%27%2F%3E%3C%2Fsvg%3E">
+<style>
+:root {
+  --c-noche: #0B0D17;
+  --c-noche2: #12162A;
+  --c-nebulosa: #1C2140;
+  --c-violeta: #8B7CF6;
+  --c-iris: #A78BFA;
+  --c-cian: #4FD1E0;
+  --c-aurora: #6EE7B7;
+  --c-rosa: #F472B6;
+  --c-ambar: #FBBF24;
+  --c-carmin: #FB7185;
+  --c-estrella: #F5F3FF;
+  --c-polvo: #8890B5;
+  --c-ceniza: #5A6186;
+  --fondo: var(--c-noche);
+  --superficie: var(--c-noche2);
+  --superficie-alta: #171C33;
+  --borde: var(--c-nebulosa);
+  --texto: var(--c-estrella);
+  --texto-tenue: var(--c-polvo);
+  --texto-apagado: var(--c-ceniza);
+  --burbuja-yo: linear-gradient(135deg, #2A2352, #1E2547);
+  --burbuja-ella: var(--superficie);
+  --sombra: 0 18px 50px -20px rgba(0,0,0,.85);
+  --radio: 18px;
+  /* Tres curvas y tres tiempos para TODA la página. Antes había diez duraciones
+     distintas (.15, .16, .18, .2, .25, .35, .5, .8) y cuatro curvas mezcladas:
+     cada cosa se movía a su aire y el conjunto se notaba a saltos. */
+  --curva: cubic-bezier(.22,1,.36,1);            /* entra decidido y frena  */
+  --curva-suave: cubic-bezier(.32,.72,0,1);      /* lo grande: paneles      */
+  --curva-salida: cubic-bezier(.4,0,.9,.45);     /* al irse, sin ceremonia  */
+  --t-toque: .16s;    /* lo que responde al dedo: botones, iconos */
+  --t-medio: .28s;    /* aparecer y desaparecer                   */
+  --t-lento: .42s;    /* paneles, el cajón, lo que ocupa pantalla */
+}
 
-    <footer class="pie">
-      <p class="nota">
-        Hablas con Celestia como visita: no guarda lo que escribes.
-      </p>
-    </footer>
+/* Amanecer: el mismo logo y los mismos acentos sobre papel claro. No es un
+   filtro invertido — los violetas se oscurecen a mano para que sigan teniendo
+   contraste sobre blanco. */
+html[data-tema="amanecer"] {
+  --fondo: #F4F3FA;
+  --superficie: #FFFFFF;
+  --superficie-alta: #FFFFFF;
+  --borde: #E2E0EF;
+  --texto: #191A2B;
+  --texto-tenue: #5C5F7A;
+  --texto-apagado: #8B8DA5;
+  --c-violeta: #6D4FE0;
+  --c-iris: #7C5CF0;
+  --c-cian: #0E93A8;
+  --c-aurora: #0E9A6B;
+  --c-rosa: #D6389A;
+  /* El carmín se quedó fuera de esta lista y el rojo de noche (#FB7185) sobre
+     papel blanco no llega ni a 2,5:1 — justo el color con el que se escriben
+     los errores y el reloj de la grabación. */
+  --c-carmin: #C6283F;
+  --burbuja-yo: linear-gradient(135deg, #EDE9FF, #E4E9FF);
+  --burbuja-ella: #FFFFFF;
+  --sombra: 0 14px 40px -22px rgba(40,30,90,.35);
+}
 
-    <script type="module" src="app.js"></script>
-  </body>
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+html, body {
+  height: 100%;
+  margin: 0;
+  background: var(--fondo);
+  color: var(--texto);
+  font: 15px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+        "Helvetica Neue", sans-serif;
+  overscroll-behavior: none;
+}
+
+#app {
+  position: relative; z-index: 1;
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  max-width: 860px; margin: 0 auto;
+}
+
+/* ── Cabecera con el orbe ───────────────────────────────────────────────── */
+header {
+  display: flex; align-items: center; gap: 14px;
+  padding: max(14px, env(safe-area-inset-top)) 16px 12px;
+  border-bottom: 1px solid var(--borde);
+  background: color-mix(in srgb, var(--fondo) 82%, transparent);
+  backdrop-filter: blur(14px);
+  position: sticky; top: 0; z-index: 5;
+}
+
+/* El logo. `touch-action:none` es lo que permite arrastrarlo para girarlo en el
+   móvil sin que la página haga scroll al mismo tiempo. */
+#orbe {
+  width: 58px; height: 58px; flex: 0 0 auto;
+  cursor: grab; touch-action: none;
+  border-radius: 50%;
+  transition: transform .5s var(--curva);
+}
+#orbe:active { cursor: grabbing; }
+#orbe.tocado { transform: scale(1.06); }
+/* Un aura tenue detrás del logo, del color del estado en curso. Cuesta un
+   `box-shadow` y hace que el orbe deje de estar pegado al fondo. */
+#orbe {
+  box-shadow: 0 0 26px -6px color-mix(in srgb, var(--acento, var(--c-violeta)) 55%, transparent);
+  transition: transform .5s var(--curva), box-shadow .8s ease;
+}
+
+.titulo { flex: 1; min-width: 0; }
+.nombre {
+  font-size: 15px; font-weight: 600; letter-spacing: .34em;
+  text-transform: uppercase;
+  background: linear-gradient(100deg, var(--c-iris), var(--c-cian));
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+/* La línea que dice en qué anda. Cambia de texto a menudo, así que se anima la
+   entrada para que el cambio se note sin tener que estar mirándola. */
+#pie {
+  font-size: 12.5px; color: var(--texto-tenue);
+  display: flex; align-items: center; gap: 7px;
+  min-height: 20px;
+}
+#pie .punto {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--c-ceniza); flex: 0 0 auto;
+  transition: background var(--t-lento) ease, box-shadow var(--t-lento) ease;
+}
+#pie.viva .punto {
+  background: var(--acento, var(--c-violeta));
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--acento, var(--c-violeta)) 60%, transparent);
+  animation: latido 1.6s infinite;
+}
+#pie.enlinea .punto { background: var(--c-aurora); }
+#pie.caida .punto { background: var(--c-carmin); }
+#pie span.txt { animation: entra-texto var(--t-medio) var(--curva); }
+@keyframes latido {
+  70%  { box-shadow: 0 0 0 8px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+@keyframes entra-texto {
+  from { opacity: 0; transform: translateY(4px); }
+}
+
+.acciones { display: flex; gap: 6px; flex: 0 0 auto; }
+.icono {
+  width: 34px; height: 34px; flex: 0 0 auto;
+  display: grid; place-items: center;
+  border: 1px solid var(--borde); border-radius: 11px;
+  background: transparent; color: var(--texto-tenue);
+  cursor: pointer; font-size: 15px;
+  transition: color var(--t-toque) ease, border-color var(--t-toque) ease,
+              background var(--t-toque) ease, transform var(--t-toque) var(--curva);
+}
+/* El `hover` solo donde hay ratón: en un móvil el dedo no «sale» del botón, así
+   que el estilo se quedaba pegado después de tocarlo. Y el `:active` va
+   DESPUÉS, o con el mismo peso ganaría el hover y el dedo no notaría nada. */
+@media (hover: hover) {
+  .icono:hover {
+    color: var(--texto); border-color: var(--c-violeta);
+    background: color-mix(in srgb, var(--c-violeta) 12%, transparent);
+    transform: translateY(-1px);
+  }
+}
+.icono:focus-visible { color: var(--texto); border-color: var(--c-violeta); }
+.icono:active { transform: scale(.92); }
+/* Los iconos se dibujan en vez de escribirse: heredan el color del botón y
+   ocupan lo mismo que los glifos de al lado. */
+.icono svg { width: 18px; height: 18px; display: block; }
+.util svg { width: 20px; height: 20px; display: block; }
+
+/* ── El hilo ────────────────────────────────────────────────────────────── */
+/* Arrastrar una imagen sobre la ventana la adjunta. El borde aparece solo
+   mientras se arrastra, para que se vea dónde soltarla. */
+#app.soltando::after {
+  content: "Suelta el archivo aquí";
+  position: fixed; inset: 10px; z-index: 40;
+  border: 2px dashed var(--c-violeta); border-radius: 20px;
+  background: color-mix(in srgb, var(--c-violeta) 10%, transparent);
+  display: grid; place-items: center;
+  color: var(--texto); font-size: 15px; pointer-events: none;
+}
+
+#hilo {
+  overflow-y: auto; overflow-x: hidden;
+  padding: 20px 16px 8px;
+  display: flex; flex-direction: column; gap: 14px;
+  scroll-behavior: smooth;
+  /* El tamaño del texto se toca en Ajustes y solo afecta a la conversación:
+     agrandar también la cabecera y el pie deja el chat sin sitio donde caber. */
+  font-size: calc(15px * var(--escala-texto, 1));
+}
+
+.msg {
+  display: flex; flex-direction: column; max-width: 84%;
+  animation: sube var(--t-medio) var(--curva) both;
+}
+.msg.yo { align-self: flex-end; align-items: flex-end; }
+.msg.ella { align-self: flex-start; }
+.msg.nota { align-self: center; max-width: 92%; }
+@keyframes sube {
+  from { opacity: 0; transform: translateY(9px) scale(.99); }
+}
+/* Al abrir una conversación entera no entran los ocho mensajes a la vez: van
+   cayendo con unas centésimas entre uno y otro, que es lo que hace que se lea
+   como que aparece la conversación y no como un pantallazo. El escalón lo pone
+   el JS (`--retraso`) y tiene tope: con cien mensajes no se espera dos segundos. */
+.msg.restaurado { animation-delay: var(--retraso, 0s); }
+/* Y al cambiar de conversación, los de antes se van en vez de desaparecer. Da
+   tiempo de sobra: mientras se desvanecen, el servidor todavía está mandando
+   los nuevos. */
+.msg.saliendo {
+  animation: baja var(--t-toque) ease-in forwards;
+  pointer-events: none;
+}
+@keyframes baja { to { opacity: 0; transform: translateY(-6px); } }
+
+.burbuja {
+  padding: 11px 15px; border-radius: var(--radio);
+  border: 1px solid var(--borde);
+  box-shadow: var(--sombra);
+  word-wrap: break-word; overflow-wrap: anywhere;
+}
+.yo .burbuja {
+  background: var(--burbuja-yo);
+  border-color: color-mix(in srgb, var(--c-violeta) 34%, transparent);
+  border-bottom-right-radius: 6px;
+}
+.ella .burbuja {
+  background: var(--burbuja-ella);
+  border-bottom-left-radius: 6px;
+}
+/* Los avisos de segundo plano («te he guardado el PDF») no son conversación:
+   se pintan al margen para que no corten el hilo de lo que se está hablando. */
+.nota .burbuja {
+  background: transparent; border-style: dashed;
+  color: var(--texto-tenue); font-size: .9em; box-shadow: none;
+  text-align: center;
+}
+.error .burbuja {
+  border-color: color-mix(in srgb, var(--c-carmin) 55%, transparent);
+  color: var(--c-carmin);
+  background: color-mix(in srgb, var(--c-carmin) 9%, transparent);
+}
+
+.meta {
+  font-size: 11px; color: var(--texto-apagado);
+  padding: 0 6px; margin-top: 5px;
+  display: flex; gap: 9px; align-items: center;
+  opacity: 0; transition: opacity var(--t-medio) ease;
+}
+.msg:hover .meta, .msg.abierta .meta { opacity: 1; }
+.meta button {
+  background: none; border: 0; color: inherit; cursor: pointer;
+  font: inherit; padding: 0;
+}
+.meta button:hover { color: var(--c-violeta); }
+
+/* Markdown ya renderizado dentro de una burbuja. */
+.burbuja p { margin: 0 0 .7em; }
+.burbuja p:last-child { margin-bottom: 0; }
+.burbuja strong { color: var(--texto); font-weight: 650; }
+.burbuja code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: .88em; padding: .12em .4em; border-radius: 6px;
+  background: color-mix(in srgb, var(--c-cian) 14%, transparent);
+  color: var(--c-cian);
+}
+.burbuja pre {
+  margin: .6em 0; padding: 11px 13px; border-radius: 12px;
+  background: color-mix(in srgb, #000 32%, var(--superficie));
+  border: 1px solid var(--borde);
+  overflow-x: auto;
+}
+.burbuja pre code { background: none; padding: 0; color: var(--texto); }
+.burbuja ul, .burbuja ol { margin: .4em 0; padding-left: 1.3em; }
+.burbuja li { margin: .22em 0; }
+.burbuja li::marker { color: var(--c-violeta); }
+.burbuja a { color: var(--c-cian); text-decoration-color: color-mix(in srgb, var(--c-cian) 40%, transparent); }
+.burbuja h3 { font-size: 1em; margin: .7em 0 .3em; color: var(--c-iris); }
+.burbuja h3:first-child { margin-top: 0; }
+.burbuja table { border-collapse: collapse; width: 100%; font-size: .9em; margin: .5em 0; display: block; overflow-x: auto; }
+.burbuja th, .burbuja td { border: 1px solid var(--borde); padding: .3em .6em; text-align: left; }
+.burbuja th { color: var(--c-iris); font-weight: 600; }
+
+/* El «está escribiendo»: el orbe en miniatura, no tres puntos genéricos. */
+#pensando {
+  align-self: flex-start; display: none;
+  align-items: center; gap: 11px;
+  padding: 9px 15px; border: 1px solid var(--borde); border-radius: var(--radio);
+  border-bottom-left-radius: 6px; background: var(--burbuja-ella);
+  box-shadow: var(--sombra);
+  animation: sube .4s var(--curva);
+}
+#pensando.activo { display: flex; }
+#pensando { animation: sube var(--t-medio) var(--curva); }
+#pensando canvas { width: 26px; height: 26px; }
+#pensando .que { font-size: 13.5px; color: var(--texto-tenue); }
+#pensando .que b { color: var(--acento, var(--c-violeta)); font-weight: 500; }
+#pensando .seg { font-size: 11.5px; color: var(--texto-apagado); font-variant-numeric: tabular-nums; }
+
+/* Pantalla de bienvenida: el orbe grande y unas cuantas cosas que preguntar. */
+#bienvenida { text-align: center; padding: 4vh 10px 2vh; }
+/* El orbe grande de la portada. Es lo primero que se ve al abrir el chat y
+   merece espacio: en la cabecera cabe a 58 px y ahí no se aprecia ni el polvo
+   ni el satélite. Se puede arrastrar como el pequeño. */
+#orbe-portada {
+  width: min(190px, 46vw); height: min(190px, 46vw);
+  margin: 0 auto 14px; display: block;
+  cursor: grab; touch-action: none; border-radius: 50%;
+  filter: drop-shadow(0 0 34px color-mix(in srgb, var(--acento, var(--c-violeta)) 40%, transparent));
+  transition: filter .8s ease;
+}
+#orbe-portada:active { cursor: grabbing; }
+#bienvenida p.vacio { color: var(--texto-apagado); margin: 0; font-size: 13px; }
+
+/* ── El redactor ────────────────────────────────────────────────────────── */
+footer {
+  padding: 10px 16px max(14px, env(safe-area-inset-bottom));
+  border-top: 1px solid var(--borde);
+  background: color-mix(in srgb, var(--fondo) 88%, transparent);
+  backdrop-filter: blur(14px);
+}
+
+/* Lo que vas a mandar, antes de mandarlo. Sin esta tira, adjuntar una foto
+   era un acto de fe: no había forma de saber si se había cogido, ni cuál. */
+#adjuntos {
+  display: none; gap: 8px; flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+#adjuntos.hay { display: flex; }
+.adjunto {
+  position: relative; border-radius: 12px; overflow: hidden;
+  border: 1px solid var(--borde); background: var(--superficie);
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px 6px 6px; font-size: 12.5px; color: var(--texto-tenue);
+}
+.adjunto img {
+  width: 42px; height: 42px; object-fit: cover; border-radius: 8px; display: block;
+}
+.adjunto .icono-archivo {
+  width: 42px; height: 42px; border-radius: 8px; display: grid; place-items: center;
+  background: color-mix(in srgb, var(--c-violeta) 16%, transparent); font-size: 19px;
+}
+.adjunto button {
+  border: 0; background: none; cursor: pointer; font: inherit;
+  color: var(--texto-apagado); padding: 2px 4px; line-height: 1;
+}
+.adjunto button:hover { color: var(--c-carmin); }
+
+#caja {
+  display: flex; align-items: flex-end; gap: 6px;
+  border: 1px solid var(--borde); border-radius: 20px;
+  background: var(--superficie); padding: 7px;
+  transition: border-color var(--t-medio) ease, box-shadow var(--t-medio) ease;
+}
+#caja:focus-within {
+  border-color: color-mix(in srgb, var(--c-violeta) 60%, transparent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--c-violeta) 13%, transparent);
+}
+#texto {
+  flex: 1; border: 0; outline: 0; resize: none; background: none;
+  padding-left: 4px;
+  color: var(--texto); font: inherit; line-height: 1.55;
+  max-height: 168px; padding: 6px 0;
+}
+#texto::placeholder { color: var(--texto-apagado); }
+/* Los botones de la caja. Mismo tamaño que el de enviar para que la fila no
+   baile, pero sin relleno: la acción principal es enviar. */
+.util {
+  width: 38px; height: 38px; flex: 0 0 auto;
+  border: 0; border-radius: 50%; cursor: pointer;
+  background: transparent; color: var(--texto-tenue);
+  font-size: 17px; display: grid; place-items: center;
+  transition: background var(--t-toque) ease, color var(--t-toque) ease,
+              transform var(--t-toque) var(--curva);
+}
+.util:hover { color: var(--texto); background: color-mix(in srgb, var(--c-violeta) 15%, transparent); }
+.util:active { transform: scale(.92); }
+.util:disabled { opacity: .35; cursor: default; }
+#reloj-micro {
+  display: none; align-self: center; font-size: 13px; color: var(--c-carmin);
+  font-variant-numeric: tabular-nums; padding: 0 2px;
+}
+#reloj-micro.visible { display: block; }
+
+/* El botón de la derecha hace dos cosas según el momento: graba si no has
+   escrito nada, envía en cuanto escribes o adjuntas. Es un solo botón porque
+   nunca hacen falta los dos a la vez, y así el pulgar siempre va al mismo
+   sitio.
+
+   Sin degradado: blanco sobre el tema oscuro y negro sobre el claro. El color
+   de marca ya lo lleva el logo; repetirlo en cada botón es lo que hacía que la
+   pantalla pareciese una demo. */
+#accion {
+  width: 40px; height: 40px; flex: 0 0 auto;
+  border: 0; border-radius: 50%; cursor: pointer;
+  background: var(--texto); color: var(--fondo);
+  display: grid; place-items: center;
+  transition: transform var(--t-toque) var(--curva), background var(--t-toque) ease,
+              color var(--t-toque) ease;
+}
+#accion .glifo {
+  font-size: 17px; line-height: 1;
+  display: block; transition: transform var(--t-toque) var(--curva);
+}
+#accion:active { transform: scale(.92); }
+#accion:hover { background: color-mix(in srgb, var(--texto) 82%, var(--c-violeta)); }
+/* Grabando: rojo y latiendo. Es el único latido fuera del logo, y aquí dice
+   algo — que el micrófono está abierto. */
+#accion.grabando {
+  background: var(--c-carmin); color: #fff;
+  animation: latir-micro 1.2s ease-in-out infinite;
+}
+#accion.grabando:hover { background: var(--c-carmin); }
+@keyframes latir-micro {
+  50% { box-shadow: 0 0 0 7px color-mix(in srgb, var(--c-carmin) 22%, transparent); }
+}
+
+.pistas {
+  display: none; flex-direction: column; gap: 2px;
+  margin-bottom: 8px; padding: 6px;
+  border: 1px solid var(--borde); border-radius: 14px;
+  background: var(--superficie-alta); box-shadow: var(--sombra);
+  max-height: 190px; overflow-y: auto;
+}
+.pistas.abiertas { display: flex; }
+.pista {
+  display: flex; gap: 10px; align-items: baseline;
+  padding: 7px 11px; border-radius: 10px; cursor: pointer; font-size: 13.5px;
+}
+.pista.sel, .pista:hover { background: color-mix(in srgb, var(--c-violeta) 16%, transparent); }
+.pista b { color: var(--c-iris); font-weight: 600; font-family: ui-monospace, monospace; }
+.pista span { color: var(--texto-tenue); font-size: 12.5px; }
+
+.atajos { font-size: 11.5px; color: var(--texto-apagado); text-align: center; margin: 7px 0 0; }
+.atajos kbd {
+  font: inherit; padding: 1px 5px; border-radius: 5px;
+  border: 1px solid var(--borde); background: var(--superficie);
+}
+
+dialog p.nota-panel{font-size:.86em;opacity:.75;line-height:1.5}
+/* ── El cajón de los chats ────────────────────────────────────────────────
+   Entra por la izquierda y ocupa el alto de la pantalla, como en cualquier
+   aplicación de mensajería: se abre con el pulgar donde está el pulgar. Sigue
+   siendo un <dialog> para no tener que rehacer a mano el fondo oscuro, el
+   Escape y la trampa del foco, que ya vienen dados. */
+#panel-chats {
+  margin: 0 auto 0 0;                 /* pegado a la izquierda */
+  width: min(330px, 86vw);
+  max-width: none;
+  height: 100dvh; max-height: 100dvh;
+  border-radius: 0 18px 18px 0;
+  padding: max(16px, env(safe-area-inset-top)) 14px
+           max(14px, env(safe-area-inset-bottom));
+  animation: cajon-entra var(--t-lento) var(--curva-suave);
+}
+/* El `display` va SOLO cuando está abierto, y esto no es un detalle: el
+   navegador esconde un <dialog> cerrado con `dialog:not([open])`, que es un
+   selector flojo. Un `#panel-chats { display: flex }` le gana por ser un id, y
+   entonces el cajón se ve SIEMPRE — también cerrado. Como es un bloque suelto
+   sin z-index y `#app` lleva z-index 1, quedaba pintado DEBAJO del chat: la
+   lista de fondo mezclada con la conversación, tapando la caja de escribir.
+   Solo se notaba al cerrarlo, porque mientras está abierto en modal vive en la
+   capa de arriba y se ve donde debe. */
+#panel-chats[open] { display: flex; flex-direction: column; }
+@keyframes cajon-entra { from { transform: translateX(-102%); } to { transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  #panel-chats, dialog, dialog::backdrop,
+  dialog[data-cerrando], dialog[data-cerrando]::backdrop { animation: none; }
+}
+
+#panel-chats h2 { margin: 0 0 2px; }
+#panel-chats .botones { margin-top: auto; }   /* los botones, abajo del todo */
+
+/* ── La lista de chats ────────────────────────────────────────────────────
+   Una fila por conversación, con su título y cuándo se habló. Se borra
+   manteniendo pulsado (en el móvil no hay clic derecho, y un aspa en cada fila
+   se pulsa sin querer con el pulgar). */
+#lista-chats {
+  flex: 1; min-height: 0;             /* que el que crece sea la lista */
+  max-height: none;
+  overflow-y: auto; margin: 10px 0 12px;
+  display: flex; flex-direction: column; gap: 2px;
+}
+/* Cuándo fue: «Hoy», «Ayer»… Ver la lista partida por días es lo que hace que
+   se lea como una historia y no como un montón. */
+.chats-dia {
+  font-size: .74em; text-transform: uppercase; letter-spacing: .06em;
+  opacity: .55; padding: 12px 12px 4px; position: sticky; top: 0;
+  background: var(--fondo);
+}
+.chats-dia:first-child { padding-top: 2px; }
+.chat-fila {
+  display: flex; align-items: baseline; gap: 10px; width: 100%;
+  padding: 11px 12px; border-radius: 12px; border: 1px solid transparent;
+  background: transparent; color: inherit; text-align: left; cursor: pointer;
+  font: inherit; -webkit-tap-highlight-color: transparent;
+  transition: background var(--t-toque) ease, border-color var(--t-toque) ease;
+}
+@media (hover: hover) {
+  .chat-fila:hover { background: color-mix(in srgb, var(--c-violeta) 12%, transparent); }
+}
+.chat-fila:focus-visible {
+  background: color-mix(in srgb, var(--c-violeta) 12%, transparent);
+}
+.chat-fila:active { transform: scale(.985); }
+.chat-fila.actual { border-color: color-mix(in srgb, var(--c-iris) 45%, transparent); }
+.chat-fila .titulo-chat {
+  flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.chat-fila .cuando { font-size: .78em; opacity: .6; flex-shrink: 0; }
+.chat-fila.actual .titulo-chat::after {
+  content: " · ahora"; font-size: .78em; opacity: .6;
+}
+/* Mientras se mantiene pulsado, la fila se va tiñendo: así se ve que algo
+   está pasando antes de que salte la pregunta. */
+.chat-fila.borrando {
+  background: color-mix(in srgb, var(--c-carmin) 22%, transparent);
+  transition: background .7s linear;   /* justo lo que dura la pulsación larga */
+}
+.chats-vacio { padding: 18px 12px; opacity: .65; text-align: center; }
+
+/* ── Paneles (token, estado) ────────────────────────────────────────────── */
+/* Un <dialog> modal vive en la capa de arriba y no le hace falta z-index. Pero
+   si por lo que sea acaba abierto SIN ser modal, es un bloque normal — y como
+   `#app` lleva z-index 1, se pintaba DEBAJO del chat: se veía la lista de
+   fondo, mezclada, con el chat encima tapando la caja de escribir. Un panel
+   abierto se ve siempre; y uno cerrado no se ve aunque el navegador no traiga
+   los estilos por defecto de <dialog>. */
+dialog { z-index: 60; }
+/* El `!important` es a propósito: cualquier regla de autor con un id le gana al
+   `dialog:not([open])` del navegador, y un panel cerrado que se ve deja la
+   pantalla inservible. Ninguna pinta de un diálogo vale eso. */
+dialog:not([open]) { display: none !important; }
+dialog {
+  border: 1px solid var(--borde); border-radius: 20px;
+  background: var(--superficie-alta); color: var(--texto);
+  padding: 22px; max-width: 380px; width: calc(100% - 32px);
+  box-shadow: var(--sombra);
+}
+dialog::backdrop {
+  background: rgba(4,5,12,.72); backdrop-filter: blur(3px);
+  animation: fundido-entra var(--t-medio) ease-out;
+}
+/* Un <dialog> se cierra de golpe: pasa a display:none y ya. Para que se vaya
+   como vino, `cerrarPanel()` marca el panel, deja correr la animación de salida
+   y solo entonces lo cierra de verdad (con un tope por si la animación no
+   llegara a terminar: un panel que no se cierra deja la pantalla inservible). */
+dialog[data-cerrando] {
+  animation: panel-sale var(--t-medio) var(--curva-salida) forwards;
+  pointer-events: none;
+}
+dialog[data-cerrando]::backdrop {
+  animation: fundido-sale var(--t-medio) ease-in forwards;
+}
+dialog:not(#panel-chats) {
+  animation: panel-entra var(--t-medio) var(--curva);
+}
+@keyframes fundido-entra { from { opacity: 0; } }
+@keyframes fundido-sale  { to   { opacity: 0; } }
+@keyframes panel-entra {
+  from { opacity: 0; transform: translateY(10px) scale(.985); }
+}
+@keyframes panel-sale {
+  to { opacity: 0; transform: translateY(6px) scale(.99); }
+}
+/* El cajón no se desvanece: se va por donde vino. */
+#panel-chats[data-cerrando] {
+  animation: cajon-sale var(--t-medio) var(--curva-salida) forwards;
+}
+@keyframes cajon-sale { to { transform: translateX(-102%); } }
+dialog h2 { margin: 0 0 6px; font-size: 16px; }
+dialog p { margin: 0 0 14px; color: var(--texto-tenue); font-size: 13.5px; }
+dialog input {
+  width: 100%; padding: 10px 13px; border-radius: 12px;
+  border: 1px solid var(--borde); background: var(--fondo);
+  color: var(--texto); font: inherit; outline: 0;
+}
+dialog input:focus { border-color: var(--c-violeta); }
+.botones { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
+.botones button:active, .aj-mini:active:not(:disabled) { transform: scale(.96); }
+.botones button {
+  padding: 9px 16px; border-radius: 11px; cursor: pointer; font: inherit;
+  border: 1px solid var(--borde); background: transparent; color: var(--texto-tenue);
+}
+.botones button.primario {
+  border: 0; color: #fff;
+  background: linear-gradient(135deg, var(--c-violeta), var(--c-cian));
+}
+#panel-estado dl { margin: 0; font-size: 13.5px; }
+#panel-estado div {
+  display: flex; justify-content: space-between; gap: 12px;
+  padding: 7px 0; border-bottom: 1px solid var(--borde);
+}
+#panel-estado div:last-child { border: 0; }
+#panel-estado dt { color: var(--texto-tenue); }
+#panel-estado dd { margin: 0; color: var(--texto); font-weight: 500; text-align: right; }
+
+/* ── Ajustes ───────────────────────────────────────────────────────────────
+   Más alto que los otros paneles: aquí se lee y se toca, no solo se confirma.
+   Lleva scroll propio porque en un móvil apaisado se saldría por abajo. */
+#panel-ajustes { max-width: 460px; max-height: 84vh; overflow-y: auto; }
+/* `hidden` es la única forma de esconder filas aquí, y contra un `display:
+   flex` de clase el atributo pierde por especificidad. */
+#panel-ajustes [hidden] { display: none !important; }
+#panel-ajustes h3 {
+  margin: 20px 0 4px; font-size: 11.5px; font-weight: 600;
+  letter-spacing: .15em; text-transform: uppercase; color: var(--c-iris);
+}
+#panel-ajustes section:first-of-type h3 { margin-top: 4px; }
+
+.aj-fila {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--borde);
+  font-size: 13.5px;
+}
+.aj-fila:last-child { border-bottom: 0; }
+.aj-fila label, .aj-fila .eti { flex: 1 1 auto; min-width: 0; cursor: pointer; }
+.aj-fila .eti { cursor: default; }
+.aj-fila small {
+  display: block; margin-top: 2px;
+  font-size: 11.5px; line-height: 1.45; color: var(--texto-apagado);
+}
+
+.aj-fila select, .aj-mini {
+  flex: 0 0 auto; max-width: 58%;
+  padding: 6px 11px; border-radius: 10px;
+  font: inherit; font-size: 12.5px;
+  border: 1px solid var(--borde); background: var(--fondo); color: var(--texto);
+  cursor: pointer; text-overflow: ellipsis;
+}
+.aj-mini { color: var(--texto-tenue); }
+.aj-fila select:hover, .aj-mini:hover:not(:disabled) {
+  border-color: var(--c-violeta); color: var(--texto);
+}
+.aj-mini:disabled { opacity: .45; cursor: not-allowed; }
+.aj-acciones { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0 4px; }
+
+/* De un vistazo: concedido, bloqueado o sin pedir. Es lo primero que se mira
+   cuando algo «no deja». */
+.aj-chip {
+  flex: 0 0 auto; padding: 3px 10px; border-radius: 999px;
+  font-size: 11.5px; font-weight: 600; white-space: nowrap;
+  border: 1px solid var(--borde); color: var(--texto-tenue);
+}
+.aj-chip[data-tono="si"] {
+  color: var(--c-aurora);
+  border-color: color-mix(in srgb, var(--c-aurora) 45%, transparent);
+  background: color-mix(in srgb, var(--c-aurora) 12%, transparent);
+}
+.aj-chip[data-tono="no"] {
+  color: var(--c-carmin);
+  border-color: color-mix(in srgb, var(--c-carmin) 45%, transparent);
+  background: color-mix(in srgb, var(--c-carmin) 10%, transparent);
+}
+.aj-chip[data-tono="quiza"] {
+  color: var(--c-iris);
+  border-color: color-mix(in srgb, var(--c-violeta) 42%, transparent);
+  background: color-mix(in srgb, var(--c-violeta) 12%, transparent);
+}
+
+/* Interruptor propio: el checkbox del sistema sale diminuto en el móvil y de
+   un color que no es el nuestro. */
+.aj-sw {
+  appearance: none; -webkit-appearance: none;
+  flex: 0 0 auto; width: 42px; height: 24px; margin: 0; padding: 0;
+  border: 1px solid var(--borde); border-radius: 999px;
+  background: var(--fondo); position: relative; cursor: pointer;
+  transition: background var(--t-toque) ease, border-color var(--t-toque) ease;
+}
+.aj-sw::after {
+  content: ""; position: absolute; top: 2px; left: 2px;
+  width: 18px; height: 18px; border-radius: 50%;
+  background: var(--texto-apagado);
+  transition: transform var(--t-toque) var(--curva), background var(--t-toque) ease;
+}
+.aj-sw:checked {
+  background: linear-gradient(135deg, var(--c-violeta), var(--c-cian));
+  border-color: transparent;
+}
+.aj-sw:checked::after { transform: translateX(18px); background: #fff; }
+.aj-sw:focus-visible { outline: 2px solid var(--c-violeta); outline-offset: 2px; }
+
+/* El nivel de entrada mientras se prueba: la única prueba de que el micrófono
+   está abierto de verdad y no solo «concedido» sobre el papel. */
+.aj-vu {
+  height: 7px; margin: 4px 0 6px; border-radius: 999px; overflow: hidden;
+  border: 1px solid var(--borde); background: var(--fondo);
+}
+.aj-vu i {
+  display: block; height: 100%; width: 0;
+  background: linear-gradient(90deg, var(--c-aurora), var(--c-cian));
+  transition: width .07s linear;
+}
+
+.aj-ayuda {
+  margin: 6px 0 2px; padding: 10px 12px; border-radius: 12px;
+  font-size: 12.5px; line-height: 1.55; color: var(--texto-tenue);
+  border: 1px solid color-mix(in srgb, var(--c-carmin) 30%, transparent);
+  background: color-mix(in srgb, var(--c-carmin) 8%, transparent);
+}
+.aj-ayuda.suave {
+  border-color: var(--borde);
+  background: color-mix(in srgb, var(--c-violeta) 7%, transparent);
+}
+.aj-ayuda b { color: var(--texto); font-weight: 600; }
+
+/* «Hay una versión nueva». No se va solo: en un móvil la pestaña se queda
+   abierta días y una mejora que nadie recarga es una mejora que no existe. */
+#nueva-version {
+  position: fixed; left: 50%; top: calc(env(safe-area-inset-top) + 10px);
+  transform: translate(-50%, -140%);
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 10px 9px 15px; border-radius: 999px;
+  font-size: 13px; color: var(--texto);
+  background: var(--superficie-alta);
+  border: 1px solid color-mix(in srgb, var(--c-violeta) 45%, transparent);
+  box-shadow: var(--sombra);
+  transition: transform var(--t-lento) var(--curva); z-index: 40;
+}
+#nueva-version.visible { transform: translate(-50%, 0); }
+#nueva-version button {
+  border: 0; border-radius: 999px; padding: 6px 13px; cursor: pointer;
+  font: inherit; font-size: 12.5px; color: #fff;
+  background: linear-gradient(135deg, var(--c-violeta), var(--c-cian));
+}
+
+/* Aviso flotante breve (copiado, hilo limpiado…). */
+#brindis {
+  position: fixed; left: 50%; bottom: 96px; transform: translate(-50%, 14px);
+  padding: 9px 16px; border-radius: 13px; font-size: 13px;
+  background: var(--superficie-alta); border: 1px solid var(--borde);
+  color: var(--texto); box-shadow: var(--sombra);
+  opacity: 0; pointer-events: none; z-index: 30;
+  transition: opacity var(--t-medio) ease, transform var(--t-medio) var(--curva);
+}
+#brindis.visible { opacity: 1; transform: translate(-50%, 0); }
+
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-thumb {
+  background: var(--borde); border-radius: 9px;
+  border: 2px solid transparent; background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--c-ceniza); background-clip: padding-box; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* Quien pide menos movimiento se queda sin giro ni parallax: el orbe sigue
+   ahí, quieto, y el chat funciona igual. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+  #hilo { scroll-behavior: auto; }
+}
+
+@media (max-width: 560px) {
+  #orbe { width: 46px; height: 46px; }
+  .nombre { letter-spacing: .26em; font-size: 14px; }
+  .msg { max-width: 92%; }
+  .atajos { display: none; }
+}
+/* ── La visita (web pública) ───────────────────────────────────────────────
+   El mismo chat, sin nada que sea del dueño: ni sus chats, ni ajustes, ni
+   adjuntos (la puerta sólo acepta texto). */
+body.visita #btn-chats,
+body.visita #btn-ajustes,
+body.visita #adjuntar,
+body.visita #adjuntos { display: none !important; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <button class="icono" id="btn-chats" data-t-title="mis_chats_t"
+            title="Mis chats (C)" aria-label="Mis chats">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" aria-hidden="true">
+        <path d="M4 7h16M4 12h16M4 17h16"/>
+      </svg>
+    </button>
+    <canvas id="orbe" title="Celestia · arrástrame para girarme, tócame para ver mi estado"></canvas>
+    <div class="titulo">
+      <div class="nombre">Celestia</div>
+      <div id="pie"><span class="punto"></span><span class="txt">conectando…</span></div>
+    </div>
+    <div class="acciones">
+      <button class="icono" id="btn-tema" title="Cambiar de tema (T)">◐</button>
+      <button class="icono" id="btn-ajustes" title="Ajustes (A)" aria-label="Ajustes">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+             stroke-linecap="round" aria-hidden="true">
+          <path d="M4 7h9M17 7h3M4 12h3M11 12h9M4 17h9M17 17h3"/>
+          <circle cx="15" cy="7" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="15" cy="17" r="2"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <div id="hilo">
+    <div id="pensando">
+      <canvas></canvas>
+      <span class="que">pensando</span>
+      <span class="seg"></span>
+    </div>
+  </div>
+
+  <footer>
+    <div class="pistas" id="pistas"></div>
+    <div id="adjuntos"></div>
+    <div id="caja">
+      <!-- Dibujado, no escrito: era un signo más fullwidth (U+FF0B), la misma
+           clase de glifo que dejó el engranaje invisible en el Android. -->
+      <button class="util" id="adjuntar" title="Adjuntar un archivo" aria-label="Adjuntar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" aria-hidden="true"><path d="M12 6v12M6 12h12"/></svg>
+      </button>
+      <textarea id="texto" rows="1" placeholder="Escribe a Celestia…"
+                autocomplete="off" autocapitalize="sentences" spellcheck="true"></textarea>
+      <span id="reloj-micro">0:00</span>
+      <button id="accion" title="Grabar una nota de voz" aria-label="Grabar">
+        <span class="glifo">●</span>
+      </button>
+    </div>
+    <input type="file" id="fichero" hidden>
+    <p class="atajos" id="atajos">
+      <kbd>Enter</kbd> enviar · <kbd>Mayús+Enter</kbd> salto de línea ·
+      <kbd>/</kbd> comandos · pega o arrastra una imagen
+    </p>
+  </footer>
+</div>
+
+<dialog id="panel-chats">
+  <h2 data-t="mis_chats">Mis chats</h2>
+  <p class="nota-panel" data-t="mantener_pulsado">Mantén pulsado uno para borrarlo.</p>
+  <div id="lista-chats"><div class="chats-vacio" data-t="cargando">Cargando…</div></div>
+  <div class="botones">
+    <button id="chats-cerrar" data-t="cerrar">Cerrar</button>
+    <button class="primario" id="chats-nuevo" data-t="chat_nuevo">Chat nuevo</button>
+  </div>
+</dialog>
+
+<dialog id="panel-token">
+  <h2 data-t="hace_falta_llave">Hace falta la llave</h2>
+  <p>Estás entrando desde otro aparato, y Celestia pide una llave para que no
+     lo haga cualquiera que esté en esta WiFi. Se guarda solo en este navegador.</p>
+  <p class="nota-panel">Para conseguirla, en el móvil donde vive Celestia:
+     <code>bash arrancar.sh enlace</code>. Ese enlace ya la lleva dentro — si lo
+     abres aquí, no hace falta escribir nada.</p>
+  <input id="campo-token" type="password" placeholder="token" autocomplete="off">
+  <div class="botones">
+    <button id="token-cancelar" data-t="ahora_no">Ahora no</button>
+    <button class="primario" id="token-guardar" data-t="guardar">Guardar</button>
+  </div>
+</dialog>
+
+<dialog id="panel-micro">
+  <h2>No puedo abrir el micrófono</h2>
+  <p id="micro-motivo"></p>
+  <div class="botones">
+    <button id="micro-ajustes">Cómo arreglarlo</button>
+    <button class="primario" id="micro-cerrar">Entendido</button>
+  </div>
+</dialog>
+
+<dialog id="panel-estado">
+  <h2>Cómo está Celestia</h2>
+  <dl id="estado-lista"></dl>
+  <div class="botones"><button class="primario" id="estado-cerrar">Cerrar</button></div>
+</dialog>
+
+<dialog id="panel-ajustes">
+  <h2 data-t="ajustes">Ajustes</h2>
+  <p data-t="ajustes_nota">Se guardan en este navegador y no salen del dispositivo.</p>
+
+  <section>
+    <h3 data-t="idioma">Idioma</h3>
+    <div class="aj-fila">
+      <label for="aj-idioma-celestia" data-t="idioma_celestia">En qué idioma te habla Celestia
+        <small data-t="idioma_celestia_pista">«Automático» sigue al idioma de cada mensaje tuyo.</small></label>
+      <select id="aj-idioma-celestia"></select>
+    </div>
+    <div class="aj-fila">
+      <label for="aj-idioma-app" data-t="idioma_app">Idioma de esta pantalla
+        <small data-t="idioma_app_pista">Los botones y los avisos. No cambia cómo te habla ella.</small></label>
+      <select id="aj-idioma-app"></select>
+    </div>
+  </section>
+
+  <section>
+    <h3 data-t="permisos">Permisos</h3>
+
+    <div class="aj-fila">
+      <span class="eti">Micrófono
+        <small>Para mandarle notas de voz con el botón ●.</small></span>
+      <span class="aj-chip" id="aj-micro-chip">comprobando…</span>
+    </div>
+    <div class="aj-acciones">
+      <button class="aj-mini" id="aj-micro-permitir">Permitir el micrófono</button>
+      <button class="aj-mini" id="aj-micro-probar">Probar</button>
+    </div>
+    <div class="aj-vu" id="aj-micro-vu" hidden><i></i></div>
+    <p class="aj-ayuda" id="aj-micro-ayuda" hidden></p>
+    <div class="aj-fila" id="aj-micro-fila-disp" hidden>
+      <label for="aj-micro-disp">Entrada</label>
+      <select id="aj-micro-disp"></select>
+    </div>
+
+    <div class="aj-fila">
+      <span class="eti">Avisos
+        <small>Para enterarte de lo que te deja escrito, aunque la app esté cerrada.</small></span>
+      <span class="aj-chip" id="aj-avisos-chip">comprobando…</span>
+    </div>
+    <div class="aj-acciones">
+      <button class="aj-mini" id="aj-avisos-permitir">Permitir los avisos</button>
+      <button class="aj-mini" id="aj-avisos-probar" hidden>Probar un aviso</button>
+    </div>
+    <p class="aj-ayuda" id="aj-avisos-ayuda" hidden></p>
+  </section>
+
+  <section>
+    <h3 data-t="voz">Voz</h3>
+    <div class="aj-fila">
+      <label for="aj-modo">Cómo te responde Celestia
+        <small id="aj-modo-pista">…</small></label>
+      <select id="aj-modo">
+        <option value="ambos">Texto, y voz si la pides</option>
+        <option value="voz_siempre">Texto y voz, siempre</option>
+        <option value="solo_texto">Solo texto</option>
+        <option value="solo_voz">Solo voz</option>
+      </select>
+    </div>
+    <div class="aj-fila">
+      <label for="aj-voz-auto">Escuchar sola su respuesta
+        <small>Si no, queda el reproductor dentro de la burbuja.</small></label>
+      <input type="checkbox" class="aj-sw" id="aj-voz-auto">
+    </div>
+    <div class="aj-fila">
+      <label for="aj-voz-tope">Duración máxima de una nota</label>
+      <select id="aj-voz-tope">
+        <option value="30">30 segundos</option>
+        <option value="60">1 minuto</option>
+        <option value="120">2 minutos</option>
+        <option value="300">5 minutos</option>
+      </select>
+    </div>
+  </section>
+
+  <section>
+    <h3>Apariencia</h3>
+    <div class="aj-fila">
+      <label for="aj-tema">Tema</label>
+      <select id="aj-tema">
+        <option value="noche">Noche</option>
+        <option value="amanecer">Amanecer</option>
+        <option value="sistema">Como el sistema</option>
+      </select>
+    </div>
+    <div class="aj-fila">
+      <label for="aj-texto">Tamaño del texto</label>
+      <select id="aj-texto">
+        <option value="0.9">Pequeño</option>
+        <option value="1">Normal</option>
+        <option value="1.15">Grande</option>
+        <option value="1.3">Muy grande</option>
+      </select>
+    </div>
+  </section>
+
+  <section>
+    <h3>Conversación</h3>
+    <div class="aj-fila">
+      <label for="aj-enter">Enter envía
+        <small>Apagado: Enter parte la línea y se manda con Ctrl+Enter.</small></label>
+      <input type="checkbox" class="aj-sw" id="aj-enter">
+    </div>
+    <div class="aj-acciones">
+      <button class="aj-mini" id="aj-ver-chats" data-t="ver_mis_chats">Ver mis chats</button>
+    </div>
+  </section>
+
+  <section>
+    <h3>Conexión</h3>
+    <div class="aj-fila">
+      <span class="eti">Token
+        <small>Solo hace falta si Celestia arrancó con CELESTIA_API_TOKEN.</small></span>
+      <span class="aj-chip" id="aj-token-chip">…</span>
+    </div>
+    <div class="aj-acciones">
+      <button class="aj-mini" id="aj-token-cambiar">Escribir el token</button>
+      <button class="aj-mini" id="aj-token-olvidar">Olvidarlo</button>
+      <button class="aj-mini" id="aj-diagnostico">Copiar diagnóstico</button>
+    </div>
+  </section>
+
+  <div class="botones"><button class="primario" id="ajustes-cerrar">Listo</button></div>
+</dialog>
+
+<div id="nueva-version">
+  <span>Hay una versión nueva del chat</span>
+  <button id="recargar-ya">Recargar</button>
+</div>
+
+<div id="brindis"></div>
+
+<script>
+"use strict";
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Lo que viene de marca.py. Si estos marcadores siguen sin sustituir es que la
+   página se abrió como fichero suelto en vez de servida por Celestia; se usan
+   entonces los mismos valores por defecto para poder verla igual.
+   ─────────────────────────────────────────────────────────────────────────── */
+const GEO = Object.assign({
+  inclinacion_grados: 24, segundo_anillo_grados: 68,
+  radio_anillo: 0.94, radio_nucleo: 0.24, punta_destello: 0.744, rayos: 0.60,
+  polvo: 16, phi: 1.6180339887498948, periodo_respiracion: 4.6
+}, {"inclinacion_grados": 24.000000000000004, "segundo_anillo_grados": 68.0, "radio_anillo": 0.94, "radio_nucleo": 0.24, "punta_destello": 0.744, "rayos": 0.6, "polvo": 16, "phi": 1.618033988749895, "periodo_respiracion": 4.6} );
+
+/* De 0 a 1 y vuelta, pero como respira algo vivo: inhala rápido y exhala
+   despacio. Un seno puro sube y baja igual y se lee como un metrónomo; el
+   truco es partir el ciclo en dos tramos de distinta duración y suavizar cada
+   uno para que no se note el empalme. Misma curva que en marca.py. */
+function respiracion(t, periodo = GEO.periodo_respiracion) {
+  const x = (t % periodo) / periodo, corte = 0.34;
+  const u = x < corte ? x / corte : 1 - (x - corte) / (1 - corte);
+  return u * u * (3 - 2 * u);
+}
+
+/* Mezcla de colores en el espacio RGB, para pasar de un estado a otro sin que
+   el orbe dé un salto de color. */
+function mezclarColor(a, b, t) {
+  const p = c => [parseInt(c.slice(1, 3), 16), parseInt(c.slice(3, 5), 16),
+                  parseInt(c.slice(5, 7), 16)];
+  const [r1, g1, b1] = p(a), [r2, g2, b2] = p(b);
+  const h = v => Math.round(v).toString(16).padStart(2, "0");
+  return "#" + h(r1 + (r2 - r1) * t) + h(g1 + (g2 - g1) * t) + h(b1 + (b2 - b1) * t);
+}
+const ESTADOS = Object.assign({
+  reposo: {verbo: "", color: "violeta", vel: 0.35, pulso: 0.18},
+  pensando: {verbo: "pensando", color: "violeta", vel: 1.6, pulso: 0.45}
+}, {"reposo": {"verbo": "", "color": "violeta", "vel": 0.35, "pulso": 0.18}, "escuchando": {"verbo": "te escucho", "color": "cian", "vel": 0.55, "pulso": 0.3}, "pensando": {"verbo": "pensando", "color": "violeta", "vel": 1.6, "pulso": 0.45}, "buscando": {"verbo": "buscando", "color": "cian", "vel": 2.4, "pulso": 0.55}, "leyendo": {"verbo": "leyendo", "color": "cian", "vel": 1.9, "pulso": 0.4}, "recordando": {"verbo": "recordando", "color": "iris", "vel": 1.1, "pulso": 0.35}, "actuando": {"verbo": "manos a la obra", "color": "aurora", "vel": 2.1, "pulso": 0.5}, "escribiendo": {"verbo": "escribiendo", "color": "aurora", "vel": 1.3, "pulso": 0.6}, "error": {"verbo": "algo ha fallado", "color": "carmin", "vel": 0.25, "pulso": 0.1}} );
+const PALETA = Object.assign({
+  violeta: "#8B7CF6", iris: "#A78BFA", cian: "#4FD1E0", aurora: "#6EE7B7",
+  rosa: "#F472B6", carmin: "#FB7185", estrella: "#F5F3FF", noche: "#0B0D17"
+}, {"noche": "#0B0D17", "noche2": "#12162A", "nebulosa": "#1C2140", "violeta": "#8B7CF6", "iris": "#A78BFA", "cian": "#4FD1E0", "aurora": "#6EE7B7", "rosa": "#F472B6", "ambar": "#FBBF24", "carmin": "#FB7185", "estrella": "#F5F3FF", "polvo": "#8890B5", "ceniza": "#5A6186"} );
+
+const QUIETO = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const $ = (s, r = document) => r.querySelector(s);
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   EL ORBE
+   El logo de Celestia: un destello de cuatro puntas dentro de dos anillos
+   orbitales inclinados, con un satélite recorriendo el de delante. No es una
+   imagen: se proyecta desde 3D en cada fotograma con la geometría de marca.py,
+   la misma que dibuja la versión braille del terminal.
+
+   Es interactivo de verdad, no decorativo: se arrastra para girarlo (y sigue
+   girando por inercia al soltarlo), se inclina hacia el puntero, suelta un
+   estallido de partículas al tocarlo y cambia de color y de velocidad según lo
+   que Celestia esté haciendo de verdad en ese momento.
+   ═══════════════════════════════════════════════════════════════════════════ */
+class Orbe {
+  constructor(lienzo, {interactivo = false, muestras = 96} = {}) {
+    this.cv = lienzo;
+    this.ctx = lienzo.getContext("2d");
+    this.muestras = muestras;
+    this.fase = Math.random() * Math.PI * 2;   // dónde empieza el giro
+    this.vel = ESTADOS.reposo.vel;
+    this.velArrastre = 0;                      // inercia tras soltarlo
+    this.estado = "reposo";
+    this.acento = PALETA.violeta;
+    this.acentoObj = PALETA.violeta;      // hacia dónde va: el color se interpola
+    this.velObj = ESTADOS.reposo.vel;
+    this.pulso = 0;
+    this.t = Math.random() * 100;         // no todos los orbes respiran a la vez
+    this.sopor = 0;                       // 0 despierto, 1 aletargado
+    this.despertar = 0;
+    this.tilt = {x: 0, y: 0};                  // hacia dónde mira, según el puntero
+    this.tiltObj = {x: 0, y: 0};
+    this.particulas = [];
+    this.escalaObj = 1;
+    this.escala = 1;
+    // Los oyentes de ventana se atan a esta señal para poder soltarlos: la
+    // portada se construye de nuevo cada vez que se vacía el hilo, y sin esto
+    // cada vaciado dejaba dos oyentes vivos apuntando a un orbe que ya no se
+    // dibuja.
+    this.aborta = new AbortController();
+    this.redimensionar();
+    addEventListener("resize", () => this.redimensionar(), {signal: this.aborta.signal});
+    if (interactivo) this._enganchar();
+  }
+
+  redimensionar() {
+    // El canvas se dibuja a la resolución real de la pantalla; si no, en un
+    // móvil con DPR 3 el orbe sale emborronado.
+    const dpr = Math.min(devicePixelRatio || 1, 3);
+    const caja = this.cv.getBoundingClientRect();
+    const lado = Math.max(24, Math.min(caja.width, caja.height) || 54);
+    this.cv.width = Math.round(lado * dpr);
+    this.cv.height = Math.round(lado * dpr);
+    this.lado = lado;
+    this.dpr = dpr;
+  }
+
+  ponEstado(nombre) {
+    const e = ESTADOS[nombre] || ESTADOS.reposo;
+    if (nombre !== this.estado) this.despertar = 1;   // un cambio lo espabila
+    this.estado = nombre;
+    // Se guardan como objetivo y el paso los alcanza poco a poco: pasar de
+    // violeta a cian de golpe se ve como un parpadeo, no como un cambio de
+    // ánimo.
+    this.velObj = e.vel;
+    this.pulsoMax = e.pulso;
+    this.acentoObj = PALETA[e.color] || PALETA.violeta;
+  }
+
+  /* Lo despierta sin cambiarle el estado: se llama al escribir, al pasar el
+     ratón por encima o al llegar un mensaje. */
+  espabilar(fuerza = 1) {
+    this.despertar = Math.max(this.despertar, fuerza);
+  }
+
+  /* Empujón visible: se usa al enviar un mensaje y al recibir la respuesta,
+     para que el logo acuse el momento en vez de seguir girando indiferente. */
+  latir(fuerza = 1) {
+    this.espabilar(1.6);
+    this.escalaObj = 1 + 0.16 * fuerza;
+    this.velArrastre += 2.2 * fuerza;
+    setTimeout(() => { this.escalaObj = 1; }, 170);
+  }
+
+  estallar(n = 22) {
+    if (QUIETO) return;
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const v = 0.35 + Math.random() * 0.95;
+      this.particulas.push({
+        x: 0, y: 0, vx: Math.cos(a) * v, vy: Math.sin(a) * v,
+        vida: 1, color: Math.random() < 0.45 ? PALETA.rosa : this.acento
+      });
+    }
+  }
+
+  _enganchar() {
+    const cv = this.cv;
+    let arrastrando = false, ultimoX = 0, movido = 0;
+
+    cv.addEventListener("pointerenter", () => this.espabilar(1.4));
+    cv.addEventListener("pointerdown", ev => {
+      arrastrando = true; movido = 0; ultimoX = ev.clientX;
+      cv.setPointerCapture(ev.pointerId);
+      cv.classList.add("tocado");
+    });
+    cv.addEventListener("pointermove", ev => {
+      if (!arrastrando) return;
+      const d = ev.clientX - ultimoX;
+      ultimoX = ev.clientX;
+      movido += Math.abs(d);
+      // Arrastrar mueve la fase directamente y deja velocidad acumulada, que
+      // es lo que hace que al soltar siga girando y frene solo.
+      this.fase += d * 0.022;
+      this.velArrastre = d * 1.1;
+    });
+    const soltar = () => {
+      if (!arrastrando) return;
+      arrastrando = false;
+      cv.classList.remove("tocado");
+      // Un toque limpio (casi sin desplazamiento) es un clic, no un arrastre.
+      if (movido < 6) { this.estallar(); this.latir(1.1); cv.dispatchEvent(new CustomEvent("orbe:tocado")); }
+    };
+    cv.addEventListener("pointerup", soltar);
+    cv.addEventListener("pointercancel", soltar);
+    cv.addEventListener("pointerleave", () => { if (arrastrando) soltar(); });
+
+    // Seguimiento del puntero: el orbe se inclina hacia donde está el ratón.
+    // Con `pointermove` sobre toda la ventana, no solo encima del logo, para
+    // que la sensación sea la de un objeto en la sala y no la de un botón.
+    addEventListener("pointermove", ev => {
+      if (QUIETO) return;
+      const c = cv.getBoundingClientRect();
+      const cx = c.left + c.width / 2, cy = c.top + c.height / 2;
+      this.tiltObj.x = Math.max(-1, Math.min(1, (ev.clientX - cx) / 320));
+      this.tiltObj.y = Math.max(-1, Math.min(1, (ev.clientY - cy) / 320));
+    }, {passive: true, signal: this.aborta.signal});
+  }
+
+  /* Suelta los oyentes de ventana. Se llama al retirar la portada. */
+  destruir() { this.aborta.abort(); }
+
+  // ── Geometría: exactamente la de marca.py ──
+  static rotX(p, a) {
+    const c = Math.cos(a), s = Math.sin(a);
+    return [p[0], p[1] * c - p[2] * s, p[1] * s + p[2] * c];
+  }
+  static rotY(p, a) {
+    const c = Math.cos(a), s = Math.sin(a);
+    return [p[0] * c + p[2] * s, p[1], -p[0] * s + p[2] * c];
+  }
+
+  _punto(t, giroPropio, inclinacion, fase, radio) {
+    let p = [radio * Math.cos(t), radio * Math.sin(t), 0];
+    p = Orbe.rotY(p, giroPropio);
+    p = Orbe.rotX(p, inclinacion);
+    p = Orbe.rotY(p, fase);
+    return p;
+  }
+
+  // Radio del destello en un ángulo: la astroide de cuatro puntas. Con p=0.38
+  // la punta mide unas cuatro veces y media el valle: más redondo deja de
+  // leerse como estrella, y más afilado desaparece en un icono pequeño.
+  static radioDestello(ang, punta) {
+    const p = 0.38;
+    const c = Math.abs(Math.cos(ang)), s = Math.abs(Math.sin(ang));
+    return punta * Math.pow(Math.pow(c, p) + Math.pow(s, p), -1 / p);
+  }
+
+  paso(dt) {
+    this.t += dt;
+    // La velocidad del arrastre se disipa hasta volver al giro propio del
+    // estado. 0.94 por fotograma ≈ dos segundos de deriva: suficiente para que
+    // se note el empujón, poco para que maree.
+    this.velArrastre *= Math.pow(0.94, dt * 60);
+    if (Math.abs(this.velArrastre) < 0.004) this.velArrastre = 0;
+
+    // Sopor: si nadie le habla ni lo toca, se va apagando. No es un ahorro de
+    // batería, es lo que hace que volver a escribirle se note — el orbe
+    // acelera y se enciende, como algo que levanta la cabeza.
+    this.despertar = Math.max(0, this.despertar - dt * 0.5);
+    const soporObj = (this.estado === "reposo" && this.despertar <= 0
+                      && !this.siempreDespierto) ? 1 : 0;
+    this.sopor += (soporObj - this.sopor) * Math.min(1, dt * (soporObj ? 0.22 : 3.5));
+
+    this.vel += (this.velObj - this.vel) * Math.min(1, dt * 2.5);
+    this.acento = mezclarColor(this.acento, this.acentoObj, Math.min(1, dt * 3.5));
+
+    const letargo = 1 - 0.55 * this.sopor;
+    if (!QUIETO) this.fase += (this.vel * letargo + this.velArrastre) * dt;
+    // Respiración de verdad, no un seno: inhala rápido y exhala despacio.
+    const objetivo = respiracion(this.t) * (this.pulsoMax ?? 0.2) * letargo;
+    this.pulso += (objetivo - this.pulso) * Math.min(1, dt * 6);
+    this.tilt.x += (this.tiltObj.x - this.tilt.x) * Math.min(1, dt * 4);
+    this.tilt.y += (this.tiltObj.y - this.tilt.y) * Math.min(1, dt * 4);
+    this.escala += (this.escalaObj - this.escala) * Math.min(1, dt * 12);
+    for (const q of this.particulas) {
+      q.x += q.vx * dt; q.y += q.vy * dt;
+      q.vx *= 0.965; q.vy *= 0.965;
+      q.vida -= dt * 1.5;
+    }
+    this.particulas = this.particulas.filter(q => q.vida > 0);
+  }
+
+  dibujar() {
+    const ctx = this.ctx, dpr = this.dpr, lado = this.lado;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, lado, lado);
+    const R = lado / 2 * 0.94 * this.escala;
+    ctx.save();
+    ctx.translate(lado / 2, lado / 2);
+
+    // El puntero inclina el plano de las órbitas y añade un poco de guiñada:
+    // el mismo orbe, mirando hacia donde está quien lo mira.
+    const incl = GEO.inclinacion_grados * Math.PI / 180 + this.tilt.y * 0.42;
+    const fase = this.fase + this.tilt.x * 0.5;
+    const N = this.muestras;
+    const finos = lado < 34;                    // el orbe de la burbuja: menos detalle
+
+    // ── Polvo ──
+    // Motas orbitando en planos distintos, cada una con su parpadeo. Van
+    // primero, debajo de todo, para que el orbe las tape al pasar. Es lo que
+    // separa un logo que gira de algo vivo: el ojo necesita movimiento pequeño
+    // e irregular alrededor del movimiento grande.
+    if (!finos && !QUIETO) {
+      const brilloPolvo = 1 - 0.5 * this.sopor;
+      for (let i = 0; i < GEO.polvo; i++) {
+        const a = (i * GEO.phi) % 1, b = (i * 0.7548776662) % 1, c2 = (i * 0.569840291) % 1;
+        const radio = 0.42 + 0.64 * a, incl2 = (b - 0.5) * 1.5;
+        const vel = 0.45 + 0.85 * c2, tam = 0.35 + 0.65 * b;
+        const ang = i * GEO.phi * 6.283 + this.t * vel * 0.6;
+        const p = Orbe.rotY(Orbe.rotX(
+          [radio * Math.cos(ang), radio * Math.sin(ang), 0], incl2), fase * 0.55);
+        const prof = (p[2] / radio + 1) / 2;
+        const centelleo = 0.55 + 0.45 * Math.sin(this.t * (1.1 + vel) + i * 2.4);
+        ctx.globalAlpha = (0.12 + 0.55 * prof) * centelleo * brilloPolvo;
+        ctx.fillStyle = tam > 0.7 ? PALETA.iris : PALETA.cian;
+        ctx.beginPath();
+        ctx.arc(p[0] * R, -p[1] * R, (0.5 + tam) * (lado / 54), 0, 7);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    // ── Anillos ──
+    // Se dibujan por tramos con opacidad propia: lo que pasa por detrás se
+    // apaga, y eso —no una sombra— es lo que da la sensación de esfera.
+    const anillos = [[0, this.acento, 1], [GEO.segundo_anillo_grados * Math.PI / 180, PALETA.cian, 0.68]];
+    ctx.lineCap = "round";
+    for (const [giro, tono, fuerza] of anillos) {
+      for (let i = 0; i < N; i++) {
+        const a = this._punto(i / N * 2 * Math.PI, giro, incl, fase, GEO.radio_anillo);
+        const b = this._punto((i + 1) / N * 2 * Math.PI, giro, incl, fase, GEO.radio_anillo);
+        const prof = ((a[2] / GEO.radio_anillo) + 1) / 2;      // 0 detrás, 1 delante
+        ctx.globalAlpha = (0.10 + 0.90 * Math.pow(prof, 1.7)) * fuerza;
+        ctx.strokeStyle = tono;
+        ctx.lineWidth = (0.6 + 1.5 * prof) * (lado / 54);
+        ctx.beginPath();
+        ctx.moveTo(a[0] * R, -a[1] * R);
+        ctx.lineTo(b[0] * R, -b[1] * R);
+        ctx.stroke();
+      }
+    }
+    ctx.globalAlpha = 1;
+
+    // ── Rayos diagonales ──
+    // Van por los valles del destello, así que el núcleo se lee como una
+    // estrella de ocho puntas. En diagonal a propósito: en la horizontal se
+    // confundían con el anillo, que casi siempre se proyecta aplastado.
+    if (!finos) {
+      const largo = GEO.rayos * (1 + 0.12 * this.pulso) * R;
+      for (const ang of [Math.PI / 4, 3 * Math.PI / 4, 5 * Math.PI / 4, 7 * Math.PI / 4]) {
+        const g = ctx.createLinearGradient(0, 0, Math.cos(ang) * largo, -Math.sin(ang) * largo);
+        g.addColorStop(0, this.acento);
+        g.addColorStop(1, "transparent");
+        ctx.strokeStyle = g;
+        ctx.lineWidth = 1.1 * (lado / 54);
+        ctx.globalAlpha = 0.5;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(Math.cos(ang) * largo, -Math.sin(ang) * largo);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    // ── El destello ──
+    const punta = GEO.punta_destello * (1 + 0.14 * this.pulso) * R;
+    ctx.beginPath();
+    const pasos = finos ? 60 : 140;
+    for (let i = 0; i <= pasos; i++) {
+      const ang = i / pasos * 2 * Math.PI;
+      const r = Orbe.radioDestello(ang, punta);
+      const x = Math.cos(ang) * r, y = -Math.sin(ang) * r;
+      i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    }
+    ctx.closePath();
+    const relleno = ctx.createRadialGradient(0, 0, 0, 0, 0, punta);
+    relleno.addColorStop(0, "#FFFFFF");
+    relleno.addColorStop(0.35, PALETA.iris || this.acento);
+    relleno.addColorStop(1, this.acento);
+    ctx.fillStyle = relleno;
+    ctx.shadowColor = this.acento;
+    ctx.shadowBlur = (finos ? 6 : 16) * (1 + this.pulso);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // ── Chispas ──
+    // Saltan por las puntas del destello y se apagan. Nacen escalonadas, con
+    // periodos que no encajan entre sí, así que aparecen de una en una y sin
+    // ritmo aparente — que es justo lo que hace que parezcan espontáneas.
+    if (!finos && !QUIETO) {
+      for (let k = 0; k < 3; k++) {
+        const ciclo = 2.3 + k * 0.77;
+        const u = ((this.t + k * 1.31) % ciclo) / ciclo;
+        if (u > 0.34) continue;
+        const avance = u / 0.34;
+        const ang = (Math.floor((this.t + k * 1.31) / ciclo) % 4) * Math.PI / 2;
+        const r = GEO.punta_destello * (1 + 0.35 * avance) * R;
+        ctx.globalAlpha = Math.pow(1 - avance, 1.6) * (1 - 0.6 * this.sopor);
+        ctx.fillStyle = "#FFFFFF";
+        ctx.shadowColor = this.acento;
+        ctx.shadowBlur = 8;
+        ctx.beginPath();
+        ctx.arc(Math.cos(ang) * r, -Math.sin(ang) * r,
+                1.8 * (1 - avance * 0.5) * (lado / 54), 0, 7);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    // ── El satélite y su estela ──
+    const avance = fase * 2.4;
+    for (let k = 6; k >= 0; k--) {
+      const p = Orbe.rotY(Orbe.rotX(
+        [GEO.radio_anillo * Math.cos(avance - k * 0.13),
+         GEO.radio_anillo * Math.sin(avance - k * 0.13), 0], incl), fase);
+      const prof = ((p[2] / GEO.radio_anillo) + 1) / 2;
+      if (prof < 0.42) continue;               // ha pasado por detrás del núcleo
+      ctx.globalAlpha = (1 - k / 8) * (0.45 + 0.55 * prof);
+      ctx.fillStyle = k === 0 ? "#FFFFFF" : PALETA.rosa;
+      ctx.shadowColor = PALETA.rosa;
+      ctx.shadowBlur = k === 0 ? 10 : 0;
+      ctx.beginPath();
+      ctx.arc(p[0] * R, -p[1] * R, (k === 0 ? 2.4 : 1.5 - k * 0.14) * (lado / 54), 0, 7);
+      ctx.fill();
+    }
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 1;
+
+    // ── Partículas del toque ──
+    for (const q of this.particulas) {
+      ctx.globalAlpha = Math.max(0, q.vida) * 0.85;
+      ctx.fillStyle = q.color;
+      ctx.beginPath();
+      ctx.arc(q.x * R, q.y * R, 1.5 * q.vida * (lado / 54), 0, 7);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    ctx.restore();
+  }
+}
+</script>
+
+<script>
+"use strict";
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   HABLAR CON CELESTIA
+   ═══════════════════════════════════════════════════════════════════════════ */
+const LLAVE_TOKEN = "celestia.token";
+
+/* La web pública (24 sep 2026): esta misma página se publica en GitHub Pages
+   (web_publica.py le mete la marca `celestia-pages`), con enlace fijo. Allí no
+   la sirve Celestia: las peticiones van al túnel de ese día (direccion.json), y
+   quien no tiene la llave entra como VISITA — el mismo chat, pero sólo charla,
+   por /visita/mensaje, sin nada privado. Fuera de Pages todo sigue como siempre. */
+const EN_PAGES = !!document.querySelector('meta[name="celestia-pages"]');
+let API_BASE = "";
+let VISITA = false;
+const historialVisita = [];
+const PATRON_TUNEL = /^https:\/\/[a-z0-9-]+\.trycloudflare\.com$/;
+async function buscarTunel() {
+  try {
+    const r = await fetch("direccion.json?t=" + Date.now(), {cache: "no-store"});
+    const d = await r.json();
+    const url = typeof d.url === "string" ? d.url : "";
+    return PATRON_TUNEL.test(url) && !url.startsWith("https://api.") ? url : "";
+  } catch { return ""; }
+}
+const LLAVE_TEMA  = "celestia.tema";
+const LLAVE_AJUSTES = "celestia.ajustes";
+
+/* La versión de `chat.html` con la que se abrió esta pestaña. La inyecta
+   `bp_chat.py` dentro del corchete, igual que los marcadores de marca.py: sin
+   sustituir queda una lista vacía, que se une en "" y desactiva el aviso —
+   que es lo que toca si la página se abrió como fichero suelto. */
+const VERSION_PAGINA = ["1790246421" ].join("");
+const CANAL = "web";              // por aquí entra y por aquí vuelve lo diferido
+
+const el = {
+  hilo: $("#hilo"), texto: $("#texto"), accion: $("#accion"),
+  pensando: $("#pensando"), pie: $("#pie"), bienvenida: $("#bienvenida"),
+  pistas: $("#pistas"), brindis: $("#brindis"),
+};
+
+/* ── Ajustes ──────────────────────────────────────────────────────────────
+   Las preferencias del chat, todas del lado del navegador. Viven en un solo
+   objeto y en una sola clave: repartirlas en `celestia.esto` y `celestia.lo
+   otro` acabó dejando huérfanas las que se dejaron de usar.
+
+   Ojo con lo que NO es un ajuste: el permiso del micrófono o el de los avisos
+   no se guardan aquí porque no son nuestros, son del navegador. Lo único que
+   podemos hacer con ellos es pedirlos y, si están bloqueados, decir dónde se
+   desbloquean. */
+const AJUSTES_BASE = Object.freeze({
+  microDispositivo: "",     // "" = el que elija el sistema
+  vozAuto: false,           // reproducir sola la respuesta hablada
+  vozSiempre: false,        // pedirle voz en cada mensaje (ver MODOS)
+  vozTope: 120,             // segundos de grabación como mucho
+  textoEscala: 1,
+  enterEnvia: true,
+  avisos: false,            // querer avisos; el permiso lo da el navegador
+});
+
+let aj = {...AJUSTES_BASE};
+
+/* Lee lo guardado sin fiarse: solo las claves conocidas y con el tipo de
+   fábrica. Un `vozSiempre: "false"` que llegara como texto sería `true` para
+   un `if`, y la voz sonaría justo cuando alguien pidió que no. */
+function cargarAjustes() {
+  let bruto = {};
+  try { bruto = JSON.parse(localStorage.getItem(LLAVE_AJUSTES) || "{}") || {}; } catch {}
+  aj = {...AJUSTES_BASE};
+  for (const clave of Object.keys(AJUSTES_BASE)) {
+    if (bruto[clave] === undefined || bruto[clave] === null) continue;
+    const base = AJUSTES_BASE[clave];
+    if (typeof base === "boolean") aj[clave] = bruto[clave] === true;
+    else if (typeof base === "number") {
+      const n = Number(bruto[clave]);
+      if (Number.isFinite(n)) aj[clave] = n;
+    } else aj[clave] = String(bruto[clave]);
+  }
+  aplicarAjustes();
+  return aj;
+}
+
+function ponAjuste(clave, valor) {
+  if (!(clave in AJUSTES_BASE)) return;      // nada que no esté en la lista
+  aj[clave] = valor;
+  try { localStorage.setItem(LLAVE_AJUSTES, JSON.stringify(aj)); } catch {}
+  aplicarAjustes();
+}
+
+/* Lo que se ve en cuanto cambia un ajuste, sin recargar. */
+function aplicarAjustes() {
+  document.documentElement.style.setProperty("--escala-texto", String(aj.textoEscala));
+  const atajos = $("#atajos");
+  if (atajos) {
+    // El pie miente si dice «Enter enviar» cuando ya no envía.
+    atajos.textContent = "";
+    const partes = aj.enterEnvia
+      ? [["Enter", " enviar · "], ["Mayús+Enter", " salto de línea · "]]
+      : [["Ctrl+Enter", " enviar · "], ["Enter", " salto de línea · "]];
+    for (const [tecla, resto] of partes) {
+      const kbd = document.createElement("kbd");
+      kbd.textContent = tecla;
+      atajos.append(kbd, resto);
+    }
+    const barra = document.createElement("kbd");
+    barra.textContent = "/";
+    atajos.append(barra, " comandos · pega o arrastra una imagen");
+  }
+}
+
+const orbe = new Orbe($("#orbe"), {interactivo: true, muestras: 110});
+let orbePortada = null;       // el grande de la portada, mientras esté a la vista
+const orbeMini = new Orbe($("#pensando canvas"), {muestras: 48});
+
+let esperando = false;
+let sonda = null;             // consulta periódica de /actividad mientras espera
+let vigia = null;             // recogida de lo que Celestia deja por su cuenta
+let t0Espera = 0;
+
+/* ── Llamadas ─────────────────────────────────────────────────────────────── */
+function token() { try { return localStorage.getItem(LLAVE_TOKEN) || ""; } catch { return ""; } }
+
+/* ── El idioma de la pantalla ──────────────────────────────────────────────
+   Celestia no se usa solo en España. Los textos de la interfaz viven aquí, en
+   una tabla: añadir un idioma es rellenar una columna, sin tocar el HTML.
+
+   Lo que NO se traduce aquí es cómo habla Celestia: eso lo decide ella según
+   el idioma de cada mensaje (o lo que se elija en Ajustes), y son dos cosas
+   distintas a propósito — se puede tener la pantalla en inglés y que ella te
+   hable en español, que es lo que quiere quien está aprendiendo un idioma. */
+const LLAVE_IDIOMA_APP = "celestia.idiomaApp";
+
+const TEXTOS = {
+  es: {
+    ajustes: "Ajustes",
+    ajustes_nota: "Se guardan en este navegador y no salen del dispositivo.",
+    idioma: "Idioma",
+    idioma_celestia: "En qué idioma te habla Celestia",
+    idioma_celestia_pista: "«Automático» sigue al idioma de cada mensaje tuyo.",
+    idioma_app: "Idioma de esta pantalla",
+    idioma_app_pista: "Los botones y los avisos. No cambia cómo te habla ella.",
+    automatico: "Automático (el de mis mensajes)",
+    mis_chats: "Mis chats",
+    mis_chats_t: "Mis chats (C)",
+    mantener_pulsado: "Mantén pulsado uno para borrarlo.",
+    cargando: "Cargando…",
+    cerrar: "Cerrar",
+    chat_nuevo: "Chat nuevo",
+    ver_mis_chats: "Ver mis chats",
+    permisos: "Permisos",
+    voz: "Voz",
+    hace_falta_llave: "Hace falta la llave",
+    ahora_no: "Ahora no",
+    guardar: "Guardar",
+    sin_chats: "Aún no hay conversaciones guardadas.",
+    no_traigo_chats: "No he podido traer los chats.",
+    chat_borrado: "Chat borrado",
+    no_pude_borrar: "No he podido borrarlo",
+    no_pude_abrir: "No he podido abrir ese chat.",
+    borrar_pregunta: "¿Borrar «{nombre}»{cuantos}?\n\nEsto no se puede deshacer.",
+    mensajes: "mensaje(s)",
+    idioma_puesto: "Idioma cambiado",
+    hoy: "Hoy",
+    ayer_titulo: "Ayer",
+    esta_semana: "Esta semana",
+    este_mes: "Este mes",
+    antes: "Antes",
+  },
+  en: {
+    ajustes: "Settings",
+    ajustes_nota: "Saved in this browser; they never leave the device.",
+    idioma: "Language",
+    idioma_celestia: "Language Celestia speaks to you in",
+    idioma_celestia_pista: "“Automatic” follows the language of each message you send.",
+    idioma_app: "Language of this screen",
+    idioma_app_pista: "Buttons and notices. It doesn't change how she talks to you.",
+    automatico: "Automatic (whatever I write in)",
+    mis_chats: "My chats",
+    mis_chats_t: "My chats (C)",
+    mantener_pulsado: "Press and hold one to delete it.",
+    cargando: "Loading…",
+    cerrar: "Close",
+    chat_nuevo: "New chat",
+    ver_mis_chats: "See my chats",
+    permisos: "Permissions",
+    voz: "Voice",
+    hace_falta_llave: "The key is needed",
+    ahora_no: "Not now",
+    guardar: "Save",
+    sin_chats: "No saved conversations yet.",
+    no_traigo_chats: "I couldn't fetch the chats.",
+    chat_borrado: "Chat deleted",
+    no_pude_borrar: "I couldn't delete it",
+    no_pude_abrir: "I couldn't open that chat.",
+    borrar_pregunta: "Delete “{nombre}”{cuantos}?\n\nThis cannot be undone.",
+    mensajes: "message(s)",
+    idioma_puesto: "Language changed",
+    hoy: "Today",
+    ayer_titulo: "Yesterday",
+    esta_semana: "This week",
+    este_mes: "This month",
+    antes: "Earlier",
+  },
+};
+
+/* El idioma de la pantalla: lo elegido, o el del navegador si lo tenemos, o
+   español. Nunca falla a media pantalla: lo que falte cae al español. */
+function idiomaApp() {
+  try {
+    const guardado = localStorage.getItem(LLAVE_IDIOMA_APP);
+    if (guardado && TEXTOS[guardado]) return guardado;
+  } catch {}
+  const delNavegador = (navigator.language || "es").slice(0, 2).toLowerCase();
+  return TEXTOS[delNavegador] ? delNavegador : "es";
+}
+
+function t(clave, sustituciones) {
+  const tabla = TEXTOS[idiomaApp()] || TEXTOS.es;
+  let texto = tabla[clave] ?? TEXTOS.es[clave] ?? clave;
+  if (sustituciones) {
+    for (const [k, v] of Object.entries(sustituciones)) {
+      texto = texto.split(`{${k}}`).join(v);
+    }
+  }
+  return texto;
+}
+
+/* Repinta lo que ya está en pantalla. Se llama al arrancar y al cambiar el
+   idioma, para no tener que recargar la página. */
+function aplicarIdiomaApp() {
+  document.querySelectorAll("[data-t]").forEach(el => {
+    const hijo = el.querySelector("small");
+    const texto = t(el.dataset.t);
+    if (hijo) {
+      // La etiqueta lleva su explicación dentro: se cambia solo la primera
+      // línea y se respeta el `<small>`, que tiene su propia clave.
+      el.childNodes[0].nodeValue = texto;
+    } else {
+      el.textContent = texto;
+    }
+  });
+  document.querySelectorAll("[data-t-title]").forEach(el => {
+    el.title = t(el.dataset.tTitle);
+  });
+  document.documentElement.lang = idiomaApp();
+}
+
+/* ── Los chats ─────────────────────────────────────────────────────────────
+   Cada conversación es un hilo con su propio identificador, y el servidor
+   guarda el contexto por separado: abrir un chat nuevo empieza de cero de
+   verdad, no solo en la pantalla. Al entrar en Celestia siempre se estrena
+   uno — lo anterior no se pierde, está en la lista. */
+let hiloActual = nuevoIdHilo();
+
+function nuevoIdHilo() {
+  const cuando = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, "");
+  const azar = Math.random().toString(36).slice(2, 8);
+  return `c-${cuando}-${azar}`;
+}
+
+/* La llave puede venir en el propio enlace («…/chat#t=abc123»), que es como se
+   abre Celestia en un aparato nuevo: se guarda y se borra de la barra en el
+   acto. Va en el fragmento a propósito — eso no se manda al servidor, no queda
+   en sus logs y no viaja en el «Referer» si la página enlaza a otro sitio. */
+function tomarLlaveDelEnlace() {
+  let bruto = "";
+  try {
+    const h = location.hash || "";
+    const m = h.match(/[#&]t=([^&]+)/);
+    if (m) bruto = decodeURIComponent(m[1]);
+    // También se admite «?token=» por si el enlace se copió a mano y el
+    // navegador (o una app de mensajería) se comió el fragmento.
+    if (!bruto) {
+      const q = new URLSearchParams(location.search).get("token");
+      if (q) bruto = q;
+    }
+  } catch { return false; }
+  if (!bruto) return false;
+  try { localStorage.setItem(LLAVE_TOKEN, bruto); } catch {}
+  try {
+    // Fuera de la barra: si alguien mira por encima del hombro, o se comparte
+    // una captura, la llave ya no está a la vista.
+    const limpio = location.pathname + location.search.replace(/([?&])token=[^&]*/, "$1")
+                                                     .replace(/[?&]$/, "");
+    history.replaceState(null, "", limpio || location.pathname);
+  } catch {}
+  return true;
+}
+tomarLlaveDelEnlace();
+
+/* El error del servidor, dicho para una persona. Lo que sale por la API son
+   etiquetas para máquinas («rate_limited»), y una burbuja que pone eso no le
+   dice a nadie qué hacer. */
+const ERRORES = {
+  rate_limited:       "Le estoy preguntando demasiado deprisa. Espera unos segundos.",
+  unauthorized:       "Necesito el token para seguir.",
+  "endpoint no existe": "Esta página le pide algo que ella no tiene. Recárgala.",
+};
+
+function enCristiano(error, estado) {
+  if (error) return ERRORES[error] || error;
+  if (estado === 413) return "Eso pesa demasiado para mandárselo.";
+  if (estado >= 500) return `Se ha atragantado con eso (error ${estado}).`;
+  return `No he podido con eso (error ${estado}).`;
+}
+
+async function api(ruta, {metodo = "GET", cuerpo = null, ms = 200000} = {}) {
+  if (EN_PAGES && !API_BASE) {
+    API_BASE = await buscarTunel();
+    if (!API_BASE) throw new Error("Celestia está apagada ahora mismo. Vuelve más tarde.");
+  }
+  const corte = new AbortController();
+  const reloj = setTimeout(() => corte.abort(), ms);
+  try {
+    const r = await fetch(API_BASE + ruta, {
+      method: metodo,
+      headers: {
+        "Content-Type": "application/json",
+        ...(token() ? {"X-Celestia-Token": token()} : {})
+      },
+      body: cuerpo ? JSON.stringify(cuerpo) : null,
+      signal: corte.signal,
+    });
+    if (r.status === 401) {
+      if (VISITA) throw new Error("Como visita solo puedo charlar contigo.");
+      pedirToken(); throw new Error("Necesito el token para seguir.");
+    }
+    const datos = await r.json().catch(() => ({}));
+    // Cualquier respuesta que no sea un 2xx es un error, traiga cuerpo o no.
+    // Antes solo se miraba `datos.error`: un 500 (que llega sin JSON) devolvía
+    // un objeto vacío y el chat lo pintaba como «se ha quedado callada»,
+    // justo lo contrario de lo que hay que mirar.
+    if (!r.ok) throw new Error(enCristiano(datos.error, r.status));
+    return datos;
+  } catch (e) {
+    if (e.name === "AbortError") throw new Error("Celestia no ha contestado a tiempo.");
+    // Un fetch que falla sin respuesta es casi siempre el daemon apagado. En
+    // Pages puede ser también que el túnel haya cambiado: se vuelve a buscar.
+    if (e instanceof TypeError) {
+      if (EN_PAGES) API_BASE = "";
+      throw new Error("No consigo hablar con Celestia. ¿Está encendida?");
+    }
+    throw e;
+  } finally { clearTimeout(reloj); }
+}
+
+/* ── Markdown ─────────────────────────────────────────────────────────────
+   Un intérprete mínimo, escrito a mano porque la página no puede depender de
+   una librería remota. Se escapa TODO el HTML de entrada antes de tocar nada:
+   a partir de ahí lo único que puede aparecer son las etiquetas que ponemos
+   aquí, así que un mensaje con etiquetas dentro se ve como texto. */
+function escapar(s) {
+  return String(s).replace(/[&<>"']/g, c => (
+    {"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+}
+
+/* El hueco donde se aparca un bloque de código mientras se procesa el resto.
+   Se escribe escapado A PROPÓSITO: un NUL puesto tal cual en el fuente no
+   sobrevive al analizador de HTML, que lo cambia por «\uFFFD» — y ese sí es un
+   carácter que puede llegar dentro de un mensaje y disparar la sustitución
+   donde no toca. Escrito así nace en tiempo de ejecución y no pasa por el
+   analizador. De paso, el fichero deja de contar como binario para `grep`. */
+const HUECO = "\u0000";
+const HUECO_RE = /\u0000(\d+)\u0000/g;
+const SOLO_HUECO_RE = /^\u0000\d+\u0000$/;
+
+function aHtml(bruto) {
+  const bloques = [];
+  // Los bloques de código se apartan primero y vuelven al final: si no, el
+  // resto de reglas se comerían los asteriscos o los guiones de dentro.
+  let t = escapar(bruto).replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
+    bloques.push(`<pre><code>${code.replace(/\n$/, "")}</code></pre>`);
+    return `${HUECO}${bloques.length - 1}${HUECO}`;
+  });
+
+  t = t.replace(/`([^`\n]+)`/g, "<code>$1</code>");
+  t = t.replace(/\*\*\*([^*]+)\*\*\*/g, "<strong><em>$1</em></strong>");
+  t = t.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  t = t.replace(/(^|[\s(])\*([^*\n]+)\*(?=[\s).,;:!?]|$)/g, "$1<em>$2</em>");
+  t = t.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
+                '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+  t = t.replace(/(^|\s)(https?:\/\/[^\s<]+)/g,
+                '$1<a href="$2" target="_blank" rel="noopener noreferrer">$2</a>');
+
+  const lineas = t.split("\n");
+  const salida = [];
+  let lista = null, tabla = null;
+  const cerrar = () => {
+    if (lista) { salida.push(`</${lista}>`); lista = null; }
+    if (tabla) { salida.push("</table>"); tabla = null; }
+  };
+  for (const linea of lineas) {
+    const l = linea.trim();
+    if (!l) { cerrar(); continue; }
+
+    // Tablas: la fila se reconoce por las barras. La de guiones que separa la
+    // cabecera se descarta, no se pinta.
+    if (/^\|.*\|$/.test(l)) {
+      const celdas = l.slice(1, -1).split("|").map(c => c.trim());
+      if (celdas.every(c => /^:?-{2,}:?$/.test(c))) continue;
+      if (!tabla) { cerrar(); salida.push("<table>"); tabla = "th"; }
+      const et = tabla === "th" ? "th" : "td";
+      salida.push("<tr>" + celdas.map(c => `<${et}>${c}</${et}>`).join("") + "</tr>");
+      tabla = "td";
+      continue;
+    }
+    if (tabla) { salida.push("</table>"); tabla = null; }
+
+    let m;
+    if ((m = l.match(/^#{1,4}\s+(.*)$/))) { cerrar(); salida.push(`<h3>${m[1]}</h3>`); continue; }
+    if ((m = l.match(/^[-*•]\s+(.*)$/))) {
+      if (lista !== "ul") { cerrar(); salida.push("<ul>"); lista = "ul"; }
+      salida.push(`<li>${m[1]}</li>`); continue;
+    }
+    if ((m = l.match(/^\d+[.)]\s+(.*)$/))) {
+      if (lista !== "ol") { cerrar(); salida.push("<ol>"); lista = "ol"; }
+      salida.push(`<li>${m[1]}</li>`); continue;
+    }
+    cerrar();
+    // Un bloque de código apartado ocupa su línea entera. Envolverlo en <p> es
+    // HTML inválido: el navegador cierra el párrafo antes del <pre> y deja uno
+    // vacío detrás, con su margen y todo.
+    salida.push(SOLO_HUECO_RE.test(l) ? l : `<p>${l}</p>`);
+  }
+  cerrar();
+  // Escapes de markdown: «\*» es un asterisco literal, no una barra y un
+  // asterisco. El modelo los usa al pie de una tabla («\*Los precios son…»)
+  // y en el chat se leían con la barra delante.
+  const html = salida.join("").replace(/\\([*_`~#[\]()\\])/g, "$1");
+  return html.replace(HUECO_RE, (_, i) => bloques[i] ?? "");
+}
+
+/* ── El hilo ──────────────────────────────────────────────────────────────── */
+function hora(ts) {
+  return new Date(ts || Date.now()).toLocaleTimeString("es-ES",
+    {hour: "2-digit", minute: "2-digit"});
+}
+
+function pintar(quien, texto, extra = {}) {
+  if (el.bienvenida) {
+    el.bienvenida.remove();
+    el.bienvenida = null;
+    orbePortada?.destruir();   // y suelta los oyentes de ventana
+    orbePortada = null;        // deja de animarse en cuanto sale de pantalla
+  }
+  const div = document.createElement("div");
+  div.className = "msg " + quien + (extra.error ? " error" : "");
+
+  const burbuja = document.createElement("div");
+  burbuja.className = "burbuja";
+  if (quien === "yo") {
+    const t = document.createElement("span");
+    t.textContent = texto;
+    t.style.whiteSpace = "pre-wrap";
+    burbuja.appendChild(t);
+  } else {
+    burbuja.innerHTML = aHtml(texto);
+  }
+
+  // Adjuntos. Un documento no se puede entregar por el navegador —vive en el
+  // dispositivo—, así que se enseña dónde quedó en vez de fingir una descarga.
+  if (extra.imagen_b64) {
+    const img = document.createElement("img");
+    img.src = "data:image/png;base64," + extra.imagen_b64;
+    img.style.cssText = "max-width:100%;border-radius:12px;margin-top:8px;display:block";
+    burbuja.appendChild(img);
+  }
+  if (extra.audio_b64) {
+    const au = document.createElement("audio");
+    au.controls = true;
+    // Sin tipo, OGG: es lo que produce el TTS de Celestia por sus cuatro
+    // caminos. Antes ponía «audio/mpeg» y un Opus etiquetado como MP3 no lo
+    // reproduce ningún navegador — la voz llegaba entera y salía muda.
+    // El tipo tiene que ser de audio para que el navegador elija decodificador.
+    // El servidor manda «application/octet-stream» cuando no reconoce la
+    // extensión, y eso es tan mudo como el «audio/mpeg» de antes: se cae al
+    // OGG, que es lo que el TTS produce por sus cuatro caminos.
+    const tipoAudio = /^audio\//.test(extra.audio_tipo || "") ? extra.audio_tipo : "audio/ogg";
+    au.src = `data:${tipoAudio};base64,` + extra.audio_b64;
+    au.style.cssText = "width:100%;margin-top:8px";
+    burbuja.appendChild(au);
+    // Solo lo que dice ella. Si viene audio SIN texto es que Celestia está en
+    // «solo voz»: entonces suena sola aunque el ajuste esté apagado, porque el
+    // audio es el mensaje entero y una burbuja muda no dice nada. El navegador
+    // puede negarse igual (autoplay sin un toque previo) y ahí no hay nada que
+    // hacer: queda el reproductor, que es lo que había antes.
+    if (quien === "ella" && (aj.vozAuto || !texto.trim())) au.play().catch(() => {});
+  }
+  if (extra.documento_ruta) {
+    const doc = document.createElement("div");
+    doc.style.cssText = "margin-top:8px;font-size:12.5px;color:var(--texto-tenue)";
+    doc.textContent = "📄 " + extra.documento_ruta;
+    burbuja.appendChild(doc);
+  }
+  div.appendChild(burbuja);
+
+  if (quien !== "nota") {
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    const cuando = document.createElement("span");
+    cuando.textContent = hora(extra.ts);
+    meta.appendChild(cuando);
+    const copiar = document.createElement("button");
+    copiar.textContent = "copiar";
+    copiar.onclick = async () => {
+      try { await navigator.clipboard.writeText(texto); brindar("Copiado"); }
+      catch { brindar("No he podido copiarlo"); }
+    };
+    meta.appendChild(copiar);
+    div.appendChild(meta);
+  }
+
+  el.hilo.insertBefore(div, el.pensando);
+  abajo();
+  return div;
+}
+
+/* Bajar al final. Suave cuando llega un mensaje (acompaña la conversación), de
+   golpe cuando se abre un chat entero (recorrer ocho mensajes de un tirón no es
+   suavidad, es esperar). El CSS lleva `scroll-behavior: smooth`, así que el
+   salto seco hay que pedirlo. */
+function alFinal(seco = false) {
+  const y = el.hilo.scrollHeight;
+  if (seco || QUIETO) {
+    try { el.hilo.scrollTo({top: y, behavior: "instant"}); }
+    catch { el.hilo.scrollTop = y; }        // navegadores sin «instant»
+  } else {
+    el.hilo.scrollTop = y;
+  }
+}
+
+function abajo() {
+  requestAnimationFrame(() => alFinal());
+}
+
+function brindar(texto) {
+  el.brindis.textContent = texto;
+  el.brindis.classList.add("visible");
+  clearTimeout(brindar._r);
+  brindar._r = setTimeout(() => el.brindis.classList.remove("visible"), 1900);
+}
+
+/* El hilo ya no se guarda en el navegador: cada conversación vive en el
+   servidor con su identificador, y se recupera desde «Mis chats». Así la
+   misma conversación se ve igual desde el móvil y desde el portátil, que
+   antes eran dos hilos distintos guardados en dos navegadores. */
+
+/* ── El estado en vivo ────────────────────────────────────────────────────── */
+function ponPie(texto, clase = "", acento = "") {
+  el.pie.className = clase;
+  if (acento) el.pie.style.setProperty("--acento", acento);
+  const t = el.pie.querySelector(".txt");
+  if (t.textContent !== texto) {
+    t.textContent = texto;
+    t.style.animation = "none";
+    void t.offsetWidth;                // reinicia la animación de entrada
+    t.style.animation = "";
+  }
+}
+
+function ponEstado(fase, detalle = "") {
+  const e = ESTADOS[fase] || ESTADOS.reposo;
+  const acento = PALETA[e.color] || PALETA.violeta;
+  orbe.ponEstado(fase);
+  orbeMini.ponEstado(fase);
+  orbePortada?.ponEstado(fase);
+  document.documentElement.style.setProperty("--acento", acento);
+  const verbo = e.verbo || "en calma";
+  const que = $("#pensando .que");
+  que.innerHTML = "";
+  const b = document.createElement("b");
+  b.textContent = verbo;
+  que.appendChild(b);
+  if (detalle) que.appendChild(document.createTextNode(" · " + detalle));
+  if (esperando) ponPie(verbo + (detalle ? " · " + detalle : ""), "viva", acento);
+}
+
+async function mirarActividad() {
+  if (VISITA) return;
+  try {
+    const a = await api("/actividad", {ms: 6000});
+    // Un «reposo» del servidor mientras se espera NO es calma: es que todavía
+    // no ha marcado fase, o que acaba de cerrar una. Pintarlo dejaba el chat
+    // diciendo «en calma» con el spinner dando vueltas.
+    if (!esperando || (a.fase && a.fase !== "reposo")) ponEstado(a.fase, a.detalle);
+  } catch {}
+  if (esperando) {
+    const s = (Date.now() - t0Espera) / 1000;
+    $("#pensando .seg").textContent = s >= 4 ? s.toFixed(0) + " s" : "";
+  }
+}
+
+/* ── Enviar ───────────────────────────────────────────────────────────────── */
+async function enviar(texto) {
+  if (esperando || (!texto.trim() && !imagenPendiente && !archivoPendiente)) return;
+  const adjunta = imagenPendiente;
+  const archivo = archivoPendiente;
+  limpiarAdjuntos();
+  dibujarAdjuntos();
+  const div = pintar("yo", texto || (archivo ? `📄 ${archivo.nombre}` : ""),
+                     adjunta ? {imagen_b64: adjunta.b64} : {});
+  div.dataset.crudo = texto;
+  if (archivo && texto) {
+    const pie = document.createElement("div");
+    pie.style.cssText = "margin-top:6px;font-size:12.5px;opacity:.75";
+    pie.textContent = "📄 " + archivo.nombre;
+    div.querySelector(".burbuja").appendChild(pie);
+  }
+  el.texto.value = "";
+  ajustarAlto();
+  esperando = true;
+  t0Espera = Date.now();
+  pintarBotonAccion();
+  el.pensando.classList.add("activo");
+  orbeMini.redimensionar();
+  $("#pensando .seg").textContent = "";
+  ponEstado("pensando");
+  orbe.latir(1);
+  abajo();
+  sonda = setInterval(mirarActividad, 420);
+
+  try {
+    if (VISITA) {
+      if (!texto.trim()) { pintar("nota", "Como visita solo puedo leer texto."); return; }
+      // El historial vive sólo en esta pestaña; la puerta no guarda nada.
+      historialVisita.push({role: "user", content: texto});
+      while (historialVisita.length > 20 || (historialVisita.length && historialVisita[0].role !== "user"))
+        historialVisita.shift();
+      let r;
+      try {
+        r = await api("/visita/mensaje", {metodo: "POST", cuerpo: {mensajes: historialVisita}});
+      } catch (e) { historialVisita.pop(); throw e; }
+      const cuerpo = (r.respuesta || "").trim();
+      // La puerta no acepta mensajes de más de 2000 caracteres en el historial.
+      historialVisita.push({role: "assistant", content: cuerpo.slice(0, 2000)});
+      const d = pintar("ella", cuerpo || "…se ha quedado callada.");
+      d.dataset.crudo = cuerpo;
+      orbe.latir(0.8);
+      return;
+    }
+    let mensaje = texto;
+    if (archivo) {
+      // El archivo se guarda en el dispositivo y el servidor lo LEE ahí mismo.
+      // Pedirle a Celestia que lo abriera por su cuenta acabó en un resumen
+      // inventado: contestó con un acta de reunión que no existía. Un dato que
+      // se puede leer no puede depender de que el modelo decida leerlo.
+      ponEstado("leyendo", archivo.nombre);
+      const sub = await api("/subir", {metodo: "POST", ms: 120000,
+        cuerpo: {nombre: archivo.nombre, datos_b64: archivo.b64}});
+      if (sub.error) throw new Error(sub.error);
+      if (sub.texto) {
+        mensaje = (texto || `Échale un vistazo a «${archivo.nombre}» y dime qué hay dentro.`)
+          + `\n\n[CONTENIDO DEL ARCHIVO «${archivo.nombre}» QUE ACABAS DE ABRIR`
+          + (sub.truncado ? " — solo el principio, el archivo sigue" : "")
+          + `. Habla SOLO de lo que pone aquí; si algo no aparece, dilo en vez de suponerlo]\n`
+          + sub.texto;
+      } else {
+        // Un binario que no sabemos leer: queda guardado y se dice tal cual,
+        // en vez de fingir que se ha entendido.
+        mensaje = (texto ? texto + "\n\n" : "") +
+          `Te he pasado el archivo «${archivo.nombre}» y lo tienes en ${sub.ruta}, ` +
+          `pero no es texto que puedas leer directamente. Dime qué hago con él.`;
+      }
+    }
+    const cuerpoPeticion = {texto: mensaje || "¿Qué ves en esta imagen?", canal: CANAL,
+                            hilo: hiloActual};
+    // «Texto y voz, siempre»: su perfil está en `ambos`, que manda voz solo
+    // cuando se la pides — así que se la pide este chat en cada mensaje.
+    if (aj.vozSiempre) cuerpoPeticion.modo_voz = true;
+    if (adjunta) {
+      cuerpoPeticion.imagen_b64 = adjunta.b64;
+      // Una foto que le mandas, no una captura de su pantalla: Celestia las
+      // trata distinto y sin esto creía estar mirando el móvil.
+      cuerpoPeticion.es_foto_usuario = true;
+    }
+    const r = await api("/mensaje", {metodo: "POST", cuerpo: cuerpoPeticion});
+    if (r.error) throw new Error(r.error);
+    const cuerpo = (r.texto || "").trim();
+    const hayAdjunto = !!(r.audio_b64 || r.imagen_b64 || r.documento_ruta);
+    if (cuerpo || hayAdjunto) {
+      // Sin texto pero con audio es lo normal cuando Celestia está en «solo
+      // voz». Antes esta rama no existía: no entraba ni en el `if` ni en el
+      // `else`, así que la respuesta —voz incluida— se tiraba sin pintar
+      // nada. Desde fuera se veía como que no contestaba.
+      const d = pintar("ella", cuerpo || "🔊 te contesta en voz", r);
+      d.dataset.crudo = cuerpo;
+    } else {
+      pintar("nota", "…se ha quedado callada.");
+    }
+    // Lo que tarda más que la petición (un PDF) llega luego por la bandeja; el
+    // vigía ya lo está esperando, aquí solo se avisa de que viene.
+    if (r.en_camino) pintar("nota", "Lo está preparando; te lo paso en cuanto esté.");
+    orbe.latir(0.8);
+  } catch (e) {
+    pintar("ella", e.message || "Algo ha fallado.", {error: true});
+    ponEstado("error");
+    // Lo escrito vuelve a la caja. Si ha fallado por el camino, reintentar
+    // tiene que costar una tecla y no volver a escribirlo entero — sobre todo
+    // en un móvil, donde el mensaje se ha tecleado con el pulgar.
+    if (texto && !el.texto.value.trim()) { el.texto.value = texto; ajustarAlto(); }
+  } finally {
+    esperando = false;
+    clearInterval(sonda); sonda = null;
+    el.pensando.classList.remove("activo");
+    pintarBotonAccion();
+    setTimeout(() => { if (!esperando) { ponEstado("reposo"); saludarEstado(); } }, 700);
+    el.texto.focus();
+  }
+}
+
+/* ── Lo que Celestia deja por su cuenta ───────────────────────────────────── */
+async function recogerPendientes() {
+  if (esperando || VISITA) return;             // no cortarle la respuesta
+  try {
+    const r = await api(`/pendientes?para=${CANAL}`, {ms: 12000});
+    const msgs = r.mensajes || [];
+    for (const m of msgs) {
+      const t = (m.texto || "").trim();
+      if (!t && !m.imagen_b64 && !m.audio_b64 && !m.documento_ruta) continue;
+      const aviso = t.startsWith("📝") || t.startsWith("🔔");
+      const d = pintar(aviso ? "nota" : "ella", t, m);
+      d.dataset.crudo = t;
+      orbe.latir(0.6);
+      avisar(t || "Te ha dejado algo");
+    }
+  } catch {}
+}
+
+/* ── Estado de la conexión ────────────────────────────────────────────────── */
+async function saludarEstado() {
+  if (esperando) return;
+  try {
+    const s = await api("/estado", {ms: 8000});
+    const modelo = s.modelo || s.backend || (s.checks && s.checks.modelo) || "";
+    ponPie(modelo ? "en línea · " + modelo : "en línea", "enlinea");
+    // Si el daemon sirve una página distinta de la que hay abierta, esta copia
+    // se ha quedado atrás. No se recarga sola: cortar una conversación a
+    // media frase sería peor que el problema que arregla.
+    if (VERSION_PAGINA && s.pagina && s.pagina !== VERSION_PAGINA) {
+      $("#nueva-version").classList.add("visible");
+    }
+  } catch {
+    ponPie("no la alcanzo — ¿está encendida?", "caida");
+  }
+}
+
+async function verEstado() {
+  const lista = $("#estado-lista");
+  lista.textContent = "";
+  abrirPanel($("#panel-estado"));
+  const fila = (k, v) => {
+    const d = document.createElement("div");
+    const dt = document.createElement("dt"); dt.textContent = k;
+    const dd = document.createElement("dd"); dd.textContent = v;
+    d.append(dt, dd); lista.appendChild(d);
+  };
+  fila("consultando…", "");
+  try {
+    const s = await api("/estado", {ms: 9000});
+    lista.textContent = "";
+    const mete = (k, v) => {
+      if (v === undefined || v === null || v === "" || typeof v === "object") return;
+      fila(k, String(v));
+    };
+    for (const [k, v] of Object.entries(s)) mete(k, v);
+    if (s.checks) for (const [k, v] of Object.entries(s.checks)) mete("check · " + k, v);
+    if (!lista.children.length) fila("sin datos", "");
+  } catch (e) {
+    lista.textContent = "";
+    fila(e.message, "");
+  }
+}
+
+function pedirToken() {
+  const d = $("#panel-token");
+  abrirPanel(d);
+  $("#campo-token").value = token();
+  setTimeout(() => $("#campo-token").focus(), 60);
+}
+</script>
+
+<script>
+"use strict";
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   COMANDOS, ATAJOS Y ARRANQUE
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Los mismos comandos que en el chat de terminal, para no tener que aprenderse
+   dos vocabularios. Los que hablan con Celestia (cambiar de canal, por ejemplo)
+   no están aquí: se escriben en castellano y ella los entiende. */
+const COMANDOS = [
+  {orden: "/ajustes",    que: "permisos, micrófono, voz, tema…"},
+  {orden: "/microfono",  que: "por qué no graba y cómo arreglarlo"},
+  {orden: "/estado",     que: "cómo está: modelo, canales, memoria"},
+  {orden: "/canales",    que: "por dónde se puede hablar con ella"},
+  {orden: "/pendientes", que: "recoger lo que dejó preparado"},
+  {orden: "/chats",      que: "ver mis chats y borrar los que sobren"},
+  {orden: "/tema",       que: "noche o amanecer"},
+  {orden: "/token",      que: "guardar el token de la API"},
+  {orden: "/ayuda",      que: "esta lista"},
+];
+
+let pistaSel = 0;
+
+function abrirPistas(filtro) {
+  const lista = COMANDOS.filter(c => c.orden.startsWith(filtro));
+  if (!lista.length) { cerrarPistas(); return; }
+  el.pistas.textContent = "";
+  pistaSel = Math.min(pistaSel, lista.length - 1);
+  lista.forEach((c, i) => {
+    const d = document.createElement("div");
+    d.className = "pista" + (i === pistaSel ? " sel" : "");
+    const b = document.createElement("b"); b.textContent = c.orden;
+    const s = document.createElement("span"); s.textContent = c.que;
+    d.append(b, s);
+    d.onclick = () => { el.texto.value = c.orden; cerrarPistas(); ejecutar(); };
+    el.pistas.appendChild(d);
+  });
+  el.pistas.classList.add("abiertas");
+  el.pistas.dataset.lista = JSON.stringify(lista.map(c => c.orden));
+}
+
+function cerrarPistas() {
+  el.pistas.classList.remove("abiertas");
+  el.pistas.dataset.lista = "[]";
+  pistaSel = 0;
+}
+
+/* Lo elegido, que puede ser «sistema»; distinto del tema que se está viendo. */
+function temaGuardado() {
+  let t = "noche";
+  try { t = localStorage.getItem(LLAVE_TEMA) || "noche"; } catch {}
+  return ["noche", "amanecer", "sistema"].includes(t) ? t : "noche";
+}
+
+/* El tema que toca pintar ahora mismo. */
+function temaEfectivo(nombre) {
+  if (nombre !== "sistema") return nombre;
+  return matchMedia("(prefers-color-scheme: light)").matches ? "amanecer" : "noche";
+}
+
+function ponTema(nombre) {
+  const visible = temaEfectivo(nombre);
+  document.documentElement.dataset.tema = visible;
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.content = visible === "amanecer" ? "#F4F3FA" : "#0B0D17";
+  try { localStorage.setItem(LLAVE_TEMA, nombre); } catch {}
+}
+
+/* Quita los mensajes de la PANTALLA. No borra nada: se usa al cambiar de chat.
+   Borrar de verdad es cosa de la lista (mantener pulsado), que es donde se ve
+   lo que se va a perder antes de perderlo. */
+function vaciarVista(suave = false) {
+  const viejos = el.hilo.querySelectorAll(".msg");
+  if (!suave || QUIETO) {
+    viejos.forEach(m => m.remove());
+    return;
+  }
+  // Marcados, no borrados: se van desvaneciendo y `limpiarLosQueSalen()` los
+  // quita del todo justo antes de pintar los nuevos, así nunca se solapan por
+  // rápido que conteste el servidor.
+  viejos.forEach(m => m.classList.add("saliendo"));
+  setTimeout(limpiarLosQueSalen, 200);
+}
+
+function limpiarLosQueSalen() {
+  el.hilo.querySelectorAll(".msg.saliendo").forEach(m => m.remove());
+}
+
+/* ── La lista de chats ─────────────────────────────────────────────────── */
+
+function cuandoFue(ts) {
+  if (!ts) return "";
+  const d = new Date(ts * 1000), ahora = new Date();
+  const dia = 86400000, delta = ahora - d;
+  const mismoDia = d.toDateString() === ahora.toDateString();
+  // En español siempre, como el resto del chat: con el idioma del navegador
+  // salía «08:20 AM» y «Jul 25» en medio de una interfaz en castellano.
+  if (mismoDia) return d.toLocaleTimeString("es-ES", {hour: "2-digit", minute: "2-digit"});
+  if (delta < 2 * dia) return "ayer";
+  if (delta < 7 * dia) return d.toLocaleDateString("es-ES", {weekday: "long"});
+  return d.toLocaleDateString("es-ES", {day: "numeric", month: "short"});
+}
+
+/* En qué montón cae una conversación: hoy, ayer, esta semana o antes. */
+function grupoDe(ts) {
+  if (!ts) return t("hoy");
+  const d = new Date(ts * 1000), ahora = new Date(), dia = 86400000;
+  if (d.toDateString() === ahora.toDateString()) return t("hoy");
+  const ayer = new Date(ahora - dia);
+  if (d.toDateString() === ayer.toDateString()) return t("ayer_titulo");
+  if (ahora - d < 7 * dia) return t("esta_semana");
+  if (ahora - d < 30 * dia) return t("este_mes");
+  return t("antes");
+}
+
+/* ── Abrir y cerrar paneles ──────────────────────────────────────────────
+   Un <dialog> se cierra de golpe: pasa a display:none y ya. Entraba animado y
+   se iba de un tirón, que es justo lo que se nota. Aquí el cierre deja correr
+   la animación de salida y solo entonces cierra de verdad.
+
+   Con dos seguros, porque un panel que no se cierra deja la pantalla
+   inservible (ya pasó): un tope por si la animación no llegara a terminar, y
+   quitar el atributo `open` si `close()` no prosperase. */
+function cerrarloYa(panel) {
+  if (!panel.dataset.cerrando) return;   // alguien lo reabrió mientras se iba
+  delete panel.dataset.cerrando;
+  try { panel.close(); } catch {}
+  if (panel.open) panel.removeAttribute("open");
+}
+
+function cerrarPanel(panel) {
+  if (!panel || !panel.open || panel.dataset.cerrando) return;
+  panel.dataset.cerrando = "1";
+  if (QUIETO) { cerrarloYa(panel); return; }
+  const fin = ev => {
+    if (ev && ev.target !== panel) return;   // una animación de algo de dentro
+    panel.removeEventListener("animationend", fin);
+    cerrarloYa(panel);
+  };
+  panel.addEventListener("animationend", fin);
+  setTimeout(() => fin(), 600);
+}
+
+/* Y abrir. Si estaba yéndose, se queda: cancelar la salida es más suave que
+   verlo desaparecer y reaparecer. */
+function abrirPanel(panel) {
+  if (!panel) return;
+  if (panel.dataset.cerrando) { delete panel.dataset.cerrando; return; }
+  if (panel.open) return;
+  try { panel.showModal(); }
+  catch { panel.setAttribute("open", ""); }
+}
+
+async function abrirPanelChats() {
+  const panel = $("#panel-chats"), lista = $("#lista-chats");
+  lista.innerHTML = `<div class="chats-vacio">${t("cargando")}</div>`;
+  abrirPanel(panel);
+  let hilos = [];
+  try {
+    hilos = (await api("/hilos", {ms: 9000})).hilos || [];
+  } catch (e) {
+    lista.innerHTML = `<div class="chats-vacio">${t("no_traigo_chats")}</div>`;
+    return;
+  }
+  // Del más reciente al más antiguo, partido por días. El servidor ya los
+  // manda ordenados; aquí solo se agrupan para que se lea de un vistazo.
+  const tieneElActual = hilos.some(h => h.id === hiloActual);
+  lista.innerHTML = "";
+  if (!tieneElActual) {
+    lista.appendChild(filaChat({id: hiloActual, titulo: t("chat_nuevo"), ultimo_ts: 0}));
+  }
+  if (!hilos.length) {
+    if (tieneElActual) lista.innerHTML = `<div class="chats-vacio">${t("sin_chats")}</div>`;
+    return;
+  }
+  let grupoAnterior = null;
+  for (const h of hilos) {
+    const grupo = grupoDe(h.ultimo_ts);
+    if (grupo !== grupoAnterior) {
+      const cabecera = document.createElement("div");
+      cabecera.className = "chats-dia";
+      cabecera.textContent = grupo;
+      lista.appendChild(cabecera);
+      grupoAnterior = grupo;
+    }
+    lista.appendChild(filaChat(h));
+  }
+}
+
+function filaChat(h) {
+  const fila = document.createElement("button");
+  fila.className = "chat-fila" + (h.id === hiloActual ? " actual" : "");
+  fila.type = "button";
+  fila.dataset.id = h.id;
+  const titulo = document.createElement("span");
+  titulo.className = "titulo-chat";
+  titulo.textContent = h.titulo || "Chat sin título";
+  const cuando = document.createElement("span");
+  cuando.className = "cuando";
+  cuando.textContent = cuandoFue(h.ultimo_ts);
+  fila.append(titulo, cuando);
+  fila.onclick = () => { if (!fila.dataset.pulsandoLargo) abrirChat(h.id); };
+  armarPulsacionLarga(fila, h);
+  return fila;
+}
+
+/* Mantener pulsado para borrar. En un móvil no hay clic derecho, y una equis en
+   cada fila se toca sin querer con el pulgar.
+
+   El «con el dedo quieto» hay que tomárselo en serio: medio segundo NO es un
+   gesto raro —un toque tranquilo dura 500-600 ms— y probándolo saltaba la
+   pregunta de borrar al abrir un chat sin más. Ahora son 700 ms Y el dedo tiene
+   que estar quieto: en cuanto se mueve (arrastrar la lista para buscar una
+   conversación), se cancela. */
+const PULSACION_LARGA = 700;   // ms
+const SE_MOVIO = 10;           // px que se le permiten al dedo
+
+function armarPulsacionLarga(fila, h) {
+  let reloj = null, desde = null;
+  const arranca = ev => {
+    delete fila.dataset.pulsandoLargo;
+    desde = {x: ev.clientX ?? 0, y: ev.clientY ?? 0};
+    fila.classList.add("borrando");
+    reloj = setTimeout(() => {
+      fila.dataset.pulsandoLargo = "1";
+      fila.classList.remove("borrando");
+      if (navigator.vibrate) { try { navigator.vibrate(18); } catch {} }
+      pedirBorrarChat(h);
+    }, PULSACION_LARGA);
+  };
+  const corta = () => {
+    clearTimeout(reloj);
+    reloj = null;
+    fila.classList.remove("borrando");
+    // El siguiente clic vuelve a valer: si no, tras un borrado cancelado la
+    // fila se quedaba muda.
+    setTimeout(() => { delete fila.dataset.pulsandoLargo; }, 60);
+  };
+  const semueve = ev => {
+    if (!reloj || !desde) return;
+    const dx = (ev.clientX ?? 0) - desde.x, dy = (ev.clientY ?? 0) - desde.y;
+    if (Math.hypot(dx, dy) > SE_MOVIO) corta();   // está desplazando la lista
+  };
+  fila.addEventListener("pointerdown", arranca);
+  fila.addEventListener("pointermove", semueve);
+  fila.addEventListener("pointerup", corta);
+  fila.addEventListener("pointerleave", corta);
+  fila.addEventListener("pointercancel", corta);
+  // Y el clic derecho, para quien esté en el ordenador. Android dispara además
+  // su propio `contextmenu` al mantener pulsado, así que si el temporizador ya
+  // ha preguntado, este no vuelve a preguntar.
+  fila.addEventListener("contextmenu", ev => {
+    ev.preventDefault();
+    if (fila.dataset.pulsandoLargo) return;
+    fila.dataset.pulsandoLargo = "1";
+    corta();
+    pedirBorrarChat(h);
+  });
+}
+
+async function pedirBorrarChat(h) {
+  const nombre = h.titulo || t("chat_nuevo");
+  const cuantos = h.mensajes ? ` (${h.mensajes} ${t("mensajes")})` : "";
+  if (!confirm(t("borrar_pregunta", {nombre, cuantos}))) return;
+  try {
+    await api(`/hilos/${encodeURIComponent(h.id)}`, {metodo: "DELETE", ms: 9000});
+  } catch (e) {
+    brindar(t("no_pude_borrar"));
+    return;
+  }
+  brindar(t("chat_borrado"));
+  // Si era el que estabas mirando, te quedas en uno nuevo y en blanco.
+  if (h.id === hiloActual) {
+    hiloActual = nuevoIdHilo();
+    vaciarVista();
+    bienvenida();
+  }
+  abrirPanelChats();
+}
+
+async function abrirChat(id) {
+  cerrarPanel($("#panel-chats"));
+  if (id === hiloActual) return;
+  vaciarVista(true);
+  hiloActual = id;
+  let mensajes = [];
+  try {
+    mensajes = (await api(`/hilos/${encodeURIComponent(id)}`, {ms: 12000})).mensajes || [];
+  } catch (e) {
+    pintar("nota", t("no_pude_abrir"));
+    return;
+  }
+  limpiarLosQueSalen();     // por si el servidor ha contestado antes de tiempo
+  // Los últimos que se ven son los que entran con retraso: escalonar desde el
+  // final hace que la conversación «caiga» hacia abajo, que es donde mira quien
+  // acaba de abrirla. Y con tope, que un chat largo no tarde en aparecer.
+  const desde = Math.max(0, mensajes.length - 12);
+  mensajes.forEach((m, i) => {
+    const texto = String(m.texto ?? "");
+    // Con su hora, no con la de ahora: el servidor la manda en segundos y
+    // `hora()` espera milisegundos, así que una conversación de ayer salía
+    // entera marcada a la hora de abrirla.
+    const div = pintar(m.quien === "yo" ? "yo" : "ella", texto,
+                       {ts: (Number(m.ts) || 0) * 1000});
+    div.dataset.crudo = texto;
+    if (QUIETO) { div.style.animation = "none"; return; }
+    div.classList.add("restaurado");
+    div.style.setProperty("--retraso", `${(Math.max(0, i - desde) * 0.035).toFixed(3)}s`);
+  });
+  if (!mensajes.length) bienvenida();
+  // Aquí NO se hace scroll suave: venir animando desde arriba una conversación
+  // que se acaba de abrir marea y tarda. Se aparece ya al final.
+  requestAnimationFrame(() => alFinal(true));
+}
+
+/* ── Los dos selectores de idioma ────────────────────────────────────────
+   Son dos cosas distintas y conviene que se vean como tales: en cuál te habla
+   ella (viaja con tu perfil, lo sabe el servidor) y en cuál está esta pantalla
+   (cosa de este navegador). Quien está aprendiendo alemán querrá la pantalla
+   en español y a Celestia hablándole en alemán. */
+const NOMBRES_APP = {es: "Español", en: "English"};
+
+async function montarSelectoresDeIdioma() {
+  const sel = $("#aj-idioma-celestia"), selApp = $("#aj-idioma-app");
+  if (!sel || sel.dataset.montado) return;
+  sel.dataset.montado = "1";
+
+  // El de la pantalla: solo los idiomas a los que está traducida de verdad.
+  selApp.innerHTML = "";
+  for (const codigo of Object.keys(TEXTOS)) {
+    const o = document.createElement("option");
+    o.value = codigo;
+    o.textContent = NOMBRES_APP[codigo] || codigo;
+    selApp.appendChild(o);
+  }
+  selApp.value = idiomaApp();
+  selApp.onchange = () => {
+    try { localStorage.setItem(LLAVE_IDIOMA_APP, selApp.value); } catch {}
+    aplicarIdiomaApp();
+    montarOpcionAuto();
+    brindar(t("idioma_puesto"));
+  };
+
+  // El de Celestia: la lista la manda el servidor, que es quien sabe cuáles
+  // reconoce. Cada uno con su nombre en su propia lengua.
+  try {
+    const r = await api("/idiomas", {ms: 9000});
+    sel.innerHTML = "";
+    const auto = document.createElement("option");
+    auto.value = "auto";
+    auto.dataset.auto = "1";
+    auto.textContent = t("automatico");
+    sel.appendChild(auto);
+    for (const i of r.idiomas || []) {
+      const o = document.createElement("option");
+      o.value = i.codigo;
+      o.textContent = i.nombre;
+      sel.appendChild(o);
+    }
+    sel.value = r.actual || "auto";
+  } catch (e) {
+    sel.innerHTML = `<option value="auto">${t("automatico")}</option>`;
+  }
+  sel.onchange = async () => {
+    try {
+      await api("/perfil", {metodo: "POST", cuerpo: {idioma: sel.value}, ms: 9000});
+      brindar(t("idioma_puesto"));
+    } catch (e) { brindar(t("no_pude_borrar")); }
+  };
+}
+
+/* «Automático» está escrito en el idioma de la pantalla: cambia con ella. */
+function montarOpcionAuto() {
+  const o = $("#aj-idioma-celestia")?.querySelector("option[data-auto]");
+  if (o) o.textContent = t("automatico");
+}
+
+function chatNuevo() {
+  cerrarPanel($("#panel-chats"));
+  if (!el.hilo.querySelector(".msg")) return;   // ya estás en uno vacío
+  hiloActual = nuevoIdHilo();
+  vaciarVista();
+  bienvenida();
+  brindar(t("chat_nuevo"));
+}
+
+async function verCanales() {
+  try {
+    const r = await api("/canales", {ms: 9000});
+    const lineas = (r.canales || []).map(c => {
+      const activo = c.activo ?? c.encendido;
+      return `- **${c.nombre || c.canal}** · ${activo ? "encendido" : "apagado"}`;
+    });
+    pintar("nota", lineas.length ? lineas.join("\n") : "No me dice ningún canal.");
+  } catch (e) {
+    pintar("nota", e.message);
+  }
+}
+
+/* Devuelve true si el texto era un comando de la propia página y ya está
+   atendido; false si hay que mandárselo a Celestia. */
+function comandoLocal(t) {
+  const orden = t.trim().toLowerCase().split(/\s+/)[0];
+  switch (orden) {
+    // Dos nombres para lo mismo: quien tiene el problema del micrófono busca
+    // «micrófono», no «ajustes».
+    case "/ajustes": case "/microfono": case "/micrófono":
+      abrirAjustes(); return true;
+    case "/chats": abrirPanelChats(); return true;
+    case "/tema":
+      ponTema(document.documentElement.dataset.tema === "noche" ? "amanecer" : "noche");
+      return true;
+    case "/token": pedirToken(); return true;
+    case "/estado": verEstado(); return true;
+    case "/canales": verCanales(); return true;
+    case "/pendientes":
+      recogerPendientes().then(() => brindar("Bandeja revisada"));
+      return true;
+    case "/ayuda":
+      pintar("nota", COMANDOS.map(c => `- \`${c.orden}\` — ${c.que}`).join("\n"));
+      return true;
+    default: return false;
+  }
+}
+
+function ejecutar() {
+  const t = el.texto.value.trim();
+  // El archivo cuenta igual que la imagen: el botón ya se pinta como «enviar»
+  // en cuanto adjuntas un PDF, y sin esto pulsarlo no hacía absolutamente
+  // nada. Misma condición que `enviar`, para que no se vuelvan a separar.
+  if (!t && !imagenPendiente && !archivoPendiente) return;
+  cerrarPistas();
+  if (t.startsWith("/") && comandoLocal(t)) {
+    el.texto.value = "";
+    ajustarAlto();
+    pintarBotonAccion();
+    return;
+  }
+  enviar(t);
+}
+
+function ajustarAlto() {
+  el.texto.style.height = "auto";
+  el.texto.style.height = Math.min(el.texto.scrollHeight, 168) + "px";
+}
+
+function bienvenida() {
+  if (el.hilo.querySelector(".msg")) return;
+  document.getElementById("bienvenida")?.remove();   // nunca dos portadas
+  orbePortada?.destruir();                           // ni dos orbes escuchando
+  const div = document.createElement("div");
+  div.id = "bienvenida";
+  const lienzo = document.createElement("canvas");
+  lienzo.id = "orbe-portada";
+  lienzo.title = "Arrástrame";
+  const p = document.createElement("p");
+  p.className = "vacio";
+  p.textContent = VISITA
+    ? "Hola, soy Celestia. Como visita puedo charlar contigo de lo que quieras."
+    : "Sin mensajes todavía.";
+  div.append(lienzo, p);
+  el.hilo.insertBefore(div, el.pensando);
+  el.bienvenida = div;
+  // Se crea aquí y no al arrancar: el canvas necesita estar en el DOM para
+  // medirse, o nace con el tamaño por defecto y sale borroso.
+  orbePortada = new Orbe(lienzo, {interactivo: true, muestras: 150});
+  // La portada no se aletarga: es justo lo que la persona está mirando
+  // mientras decide qué preguntar.
+  orbePortada.siempreDespierto = true;
+  orbePortada.ponEstado(orbe.estado);
+}
+
+/* ── Sucesos ──────────────────────────────────────────────────────────────── */
+el.texto.addEventListener("input", () => {
+  ajustarAlto();
+  pintarBotonAccion();
+  const v = el.texto.value;
+  if (v.startsWith("/") && !v.includes(" ")) abrirPistas(v.toLowerCase());
+  else cerrarPistas();
+  // Mientras se escribe, el orbe escucha: late más deprisa y se tiñe de cian.
+  if (!esperando) {
+    orbe.ponEstado("escuchando");
+    clearTimeout(el.texto._calma);
+    el.texto._calma = setTimeout(() => { if (!esperando) orbe.ponEstado("reposo"); }, 2200);
+  }
+});
+
+el.texto.addEventListener("keydown", ev => {
+  const abiertas = el.pistas.classList.contains("abiertas");
+  if (abiertas) {
+    const lista = JSON.parse(el.pistas.dataset.lista || "[]");
+    if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
+      ev.preventDefault();
+      pistaSel = (pistaSel + (ev.key === "ArrowDown" ? 1 : lista.length - 1)) % lista.length;
+      abrirPistas(el.texto.value.toLowerCase());
+      return;
+    }
+    if (ev.key === "Tab" || (ev.key === "Enter" && lista.length)) {
+      ev.preventDefault();
+      el.texto.value = lista[pistaSel];
+      cerrarPistas();
+      if (ev.key === "Enter") ejecutar();
+      return;
+    }
+    if (ev.key === "Escape") { cerrarPistas(); return; }
+  }
+  // Enter envía y Mayús+Enter parte la línea, salvo que en Ajustes se pida al
+  // revés: entonces manda Ctrl+Enter (o Cmd+Enter) y Enter deja escribir a
+  // gusto. En el móvil el teclado manda su propio salto de línea, y
+  // `isComposing` evita cortar un acento a medias.
+  if (ev.key !== "Enter" || ev.isComposing) return;
+  const manda = aj.enterEnvia
+    ? !ev.shiftKey && !ev.ctrlKey && !ev.metaKey
+    : ev.ctrlKey || ev.metaKey;
+  if (manda) {
+    ev.preventDefault();
+    ejecutar();
+  }
+});
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ADJUNTOS
+   Celestia ve imágenes (las analiza con visión) y entiende notas de voz (las
+   transcribe con Whisper). Las dos cosas existían en la API desde antes; lo
+   que faltaba era poder dárselas desde el navegador.
+   Vídeo no: no lo procesa por ningún canal, así que el selector solo acepta
+   imágenes en vez de aceptarlo todo y fallar luego.
+   ═══════════════════════════════════════════════════════════════════════════ */
+const MAX_IMAGEN = 7 * 1024 * 1024;    // /mensaje corta en 10 MB de base64
+const MAX_ARCHIVO = 18 * 1024 * 1024;  // el mismo tope que /subir
+let imagenPendiente = null;            // {b64, nombre, url}
+let archivoPendiente = null;           // {b64, nombre, bytes} — cualquier otra cosa
+
+function leerComoBase64(fichero) {
+  return new Promise((ok, mal) => {
+    const lector = new FileReader();
+    // El resultado viene como data:… y el backend solo quiere la carga.
+    lector.onload = () => ok(String(lector.result).split(",")[1] || "");
+    lector.onerror = () => mal(new Error("no pude leer el fichero"));
+    lector.readAsDataURL(fichero);
+  });
+}
+
+/* Adjuntar. Las imágenes y el resto siguen caminos distintos porque Celestia
+   hace cosas distintas con ellas: una imagen la MIRA (visión, va dentro del
+   propio mensaje); cualquier otro archivo lo GUARDA en el dispositivo y luego
+   lo lee con sus herramientas, como haría con un fichero que ya estuviera ahí. */
+async function adjuntar(fichero) {
+  if (!fichero) return;
+  // El vídeo se descarta antes de mirar el peso: Celestia no lo procesa por
+  // ningún canal, y decirle a alguien que su vídeo «pesa demasiado» le hace
+  // buscar uno más corto para nada.
+  if ((fichero.type || "").startsWith("video/")) {
+    brindar("Todavía no sé ver vídeos");
+    return;
+  }
+  const esImagen = (fichero.type || "").startsWith("image/");
+  const tope = esImagen ? MAX_IMAGEN : MAX_ARCHIVO;
+  if (fichero.size > tope) {
+    brindar(`Demasiado grande (máx. ${Math.round(tope / 1048576)} MB)`);
+    return;
+  }
+  try {
+    const b64 = await leerComoBase64(fichero);
+    limpiarAdjuntos();
+    if (esImagen) {
+      imagenPendiente = {b64, nombre: fichero.name || "imagen",
+                         url: URL.createObjectURL(fichero)};
+    } else {
+      archivoPendiente = {b64, nombre: fichero.name || "archivo", bytes: fichero.size};
+    }
+    dibujarAdjuntos();
+    pintarBotonAccion();
+    el.texto.focus();
+  } catch {
+    brindar("No he podido leer ese archivo");
+  }
+}
+
+function limpiarAdjuntos() {
+  // Uno cada vez: `/mensaje` acepta una imagen por turno, y acumular en la
+  // interfaz para mandar solo una sería mentir.
+  if (imagenPendiente) URL.revokeObjectURL(imagenPendiente.url);
+  imagenPendiente = null;
+  archivoPendiente = null;
+}
+
+function quitarImagen() {
+  limpiarAdjuntos();
+  dibujarAdjuntos();
+  pintarBotonAccion();
+}
+
+function dibujarAdjuntos() {
+  const caja = $("#adjuntos");
+  caja.textContent = "";
+  const hay = imagenPendiente || archivoPendiente;
+  caja.classList.toggle("hay", !!hay);
+  if (!hay) return;
+  const item = document.createElement("div");
+  item.className = "adjunto";
+  if (imagenPendiente) {
+    const img = document.createElement("img");
+    img.src = imagenPendiente.url;
+    img.alt = "";
+    item.appendChild(img);
+  } else {
+    const icono = document.createElement("span");
+    icono.className = "icono-archivo";
+    icono.textContent = "📄";
+    item.appendChild(icono);
+  }
+  const nombre = document.createElement("span");
+  nombre.textContent = (hay.nombre || "").slice(0, 28);
+  const quitar = document.createElement("button");
+  quitar.textContent = "✕";
+  quitar.title = "Quitar";
+  quitar.onclick = quitarImagen;
+  item.append(nombre, quitar);
+  caja.appendChild(item);
+}
+
+$("#adjuntar").onclick = () => $("#fichero").click();
+$("#fichero").onchange = ev => {
+  adjuntar(ev.target.files[0]);
+  ev.target.value = "";              // permite volver a elegir el mismo
+};
+
+// Pegar una captura del portapapeles.
+addEventListener("paste", ev => {
+  for (const item of ev.clipboardData?.items || []) {
+    if (item.type.startsWith("image/")) {
+      adjuntar(item.getAsFile());
+      ev.preventDefault();
+      return;
+    }
+  }
+});
+
+// Arrastrar y soltar sobre la ventana.
+let arrastres = 0;                   // contador: `dragleave` salta al pasar
+                                     // por encima de cada hijo
+addEventListener("dragenter", ev => {
+  if (!ev.dataTransfer?.types?.includes("Files")) return;
+  ev.preventDefault();
+  if (++arrastres === 1) $("#app").classList.add("soltando");
+});
+addEventListener("dragover", ev => {
+  if (ev.dataTransfer?.types?.includes("Files")) ev.preventDefault();
+});
+addEventListener("dragleave", () => {
+  if (--arrastres <= 0) { arrastres = 0; $("#app").classList.remove("soltando"); }
+});
+addEventListener("drop", ev => {
+  if (!ev.dataTransfer?.files?.length) return;
+  ev.preventDefault();
+  arrastres = 0;
+  $("#app").classList.remove("soltando");
+  adjuntar(ev.dataTransfer.files[0]);
+});
+
+/* ── Permisos del navegador ───────────────────────────────────────────────
+   El micrófono y los avisos no se «activan» desde aquí: los concede el
+   navegador y, una vez dice que no, no vuelve a preguntar. Lo único honesto
+   que puede hacer la app es (1) pedirlo bien, (2) contar en qué estado está y
+   (3) decir el camino exacto para desbloquearlo en ESTE navegador. Eso es todo
+   lo que hay debajo. */
+
+/* Qué dice el navegador del permiso del micrófono, sin abrirlo:
+   "concedido" | "denegado" | "sin-pedir" | "sin-micro" | "desconocido".
+   Firefox no publica `microphone` en la Permissions API, así que allí se
+   deduce por los nombres de los dispositivos: sin permiso vienen vacíos. */
+async function permisoMicro() {
+  try {
+    const p = await navigator.permissions?.query({name: "microphone"});
+    const mapa = {granted: "concedido", denied: "denegado", prompt: "sin-pedir"};
+    if (p && mapa[p.state]) return mapa[p.state];
+  } catch {}
+  try {
+    const entradas = (await navigator.mediaDevices.enumerateDevices())
+                       .filter(d => d.kind === "audioinput");
+    if (!entradas.length) return "sin-micro";
+    if (entradas.some(d => d.label)) return "concedido";
+  } catch {}
+  return "desconocido";
+}
+
+/* El motivo de un fallo de `getUserMedia`, en cristiano. Vive aquí y no dentro
+   de quien graba porque lo cuentan dos sitios: el botón del micro y el panel,
+   y con el texto duplicado se quedaron distintos. */
+function motivoMicro(e) {
+  const nombre = e?.name || "";
+  if (nombre === "NotAllowedError" || nombre === "SecurityError")
+    return "Le has dicho que no al micrófono, o el navegador lo tiene bloqueado.";
+  if (nombre === "NotFoundError" || nombre === "OverconstrainedError")
+    return "No encuentro ningún micrófono en este dispositivo.";
+  if (nombre === "NotReadableError")
+    return "Otra aplicación está usando el micrófono. Ciérrala y vuelve a probar.";
+  return "No he podido abrir el micrófono" + (nombre ? ` (${nombre})` : "") + ".";
+}
+
+/* Dónde se desbloquea, en este navegador y en este sistema. Un «revisa los
+   permisos» genérico no sirve: el que llega aquí ya lo ha intentado. */
+function comoDesbloquearMicro() {
+  const ua = navigator.userAgent;
+  const android = /Android/i.test(ua);
+  const ios = /iPhone|iPad|iPod/i.test(ua);
+  const firefox = /Firefox|FxiOS/i.test(ua);
+  if (android && firefox) {
+    return "Toca el candado que hay junto a la dirección → <b>Borrar permisos y " +
+           "recargar</b>, y di que sí cuando vuelva a preguntar. Si ni siquiera " +
+           "pregunta, es Android quien se lo niega a Firefox: <b>Ajustes → " +
+           "Aplicaciones → Firefox → Permisos → Micrófono → Permitir</b>.";
+  }
+  if (android) {
+    return "En Chrome: toca el candado (o <b>⋮ → Información del sitio</b>) junto " +
+           "a la dirección → <b>Permisos → Micrófono → Permitir</b>, y recarga la " +
+           "página. Si el micrófono no aparece en esa lista, es Android quien se lo " +
+           "niega a Chrome: <b>Ajustes → Aplicaciones → Chrome → Permisos → " +
+           "Micrófono → Permitir</b>.";
+  }
+  if (ios) {
+    return "En iPhone y iPad el navegador solo abre el micrófono en páginas " +
+           "seguras (https, o localhost). Comprueba además <b>Ajustes → Safari → " +
+           "Micrófono → Preguntar</b> y <b>Ajustes → Privacidad y seguridad → " +
+           "Micrófono</b>.";
+  }
+  if (firefox) {
+    return "Haz clic en el candado a la izquierda de la dirección, quita el " +
+           "bloqueo del micrófono y recarga la página.";
+  }
+  return "Haz clic en el candado (o el icono de ajustes) a la izquierda de la " +
+         "dirección → <b>Permisos → Micrófono → Permitir</b>, y recarga la página.";
+}
+
+/* Qué micrófono pedir. Si el elegido ya no está (unos auriculares que se
+   fueron), `exact` falla; quien llama lo reintenta sin restricción. */
+function restriccionMicro() {
+  return aj.microDispositivo ? {deviceId: {exact: aj.microDispositivo}} : true;
+}
+
+/* Abre el micrófono con el dispositivo elegido y, si ese dispositivo ya no
+   existe, con el del sistema. Devuelve la pista o lanza. */
+async function abrirMicro() {
+  try {
+    return await navigator.mediaDevices.getUserMedia({audio: restriccionMicro()});
+  } catch (e) {
+    if (aj.microDispositivo && (e?.name === "OverconstrainedError" || e?.name === "NotFoundError")) {
+      ponAjuste("microDispositivo", "");
+      return await navigator.mediaDevices.getUserMedia({audio: true});
+    }
+    throw e;
+  }
+}
+
+/* Pedirlo. Se abre y se cierra al momento: lo que se quiere de aquí es que el
+   navegador enseñe su aviso, no grabar. */
+async function pedirMicro() {
+  const impedimento = porQueNoPuedoGrabar();
+  if (impedimento) { await pintarMicro(); brindar("Aquí no puedo abrir el micrófono"); return; }
+  try {
+    const pista = await abrirMicro();
+    pista.getTracks().forEach(p => p.stop());
+    brindar("Micrófono concedido");
+  } catch (e) {
+    brindar(motivoMicro(e));
+  }
+  await pintarMicro();
+  await listarMicros();
+}
+
+/* La prueba con nivel en vivo. «Concedido» no quiere decir que entre sonido:
+   un manos libres apagado da permiso y silencio. */
+let pruebaMicro = null;
+
+async function alternarPruebaMicro() {
+  if (pruebaMicro) { pararPruebaMicro(); return; }
+  const impedimento = porQueNoPuedoGrabar();
+  if (impedimento) { brindar("Aquí no puedo abrir el micrófono"); return; }
+  let pista;
+  try { pista = await abrirMicro(); }
+  catch (e) { brindar(motivoMicro(e)); await pintarMicro(); return; }
+
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) { pista.getTracks().forEach(p => p.stop()); brindar("Este navegador no mide el nivel"); return; }
+  const ctx = new Ctx();
+  const analizador = ctx.createAnalyser();
+  analizador.fftSize = 512;
+  ctx.createMediaStreamSource(pista).connect(analizador);
+  const datos = new Uint8Array(analizador.fftSize);
+  const barra = $("#aj-micro-vu i");
+  $("#aj-micro-vu").hidden = false;
+  $("#aj-micro-probar").textContent = "Parar la prueba";
+
+  pruebaMicro = {pista, ctx, raf: 0, reloj: 0};
+  const paso = () => {
+    if (!pruebaMicro) return;
+    analizador.getByteTimeDomainData(datos);
+    let pico = 0;
+    for (const v of datos) pico = Math.max(pico, Math.abs(v - 128));
+    // Raíz en vez de lineal: hablando normal el pico se queda por el 15 % y la
+    // barra parecía decir que no entra nada.
+    const nivel = Math.min(1, Math.sqrt(pico / 128) * 1.25);
+    barra.style.width = (nivel * 100).toFixed(0) + "%";
+    pruebaMicro.raf = requestAnimationFrame(paso);
+  };
+  paso();
+  // Se apaga sola: dejar el micrófono abierto porque alguien cerró el panel es
+  // exactamente lo que hace desconfiar de una app.
+  pruebaMicro.reloj = setTimeout(pararPruebaMicro, 25000);
+  await pintarMicro();
+  await listarMicros();
+}
+
+function pararPruebaMicro() {
+  if (!pruebaMicro) return;
+  cancelAnimationFrame(pruebaMicro.raf);
+  clearTimeout(pruebaMicro.reloj);
+  pruebaMicro.pista.getTracks().forEach(p => p.stop());
+  try { pruebaMicro.ctx.close(); } catch {}
+  pruebaMicro = null;
+  $("#aj-micro-vu").hidden = true;
+  $("#aj-micro-vu i").style.width = "0%";
+  $("#aj-micro-probar").textContent = "Probar";
+}
+
+/* Los micrófonos que hay. Sin permiso los nombres vienen vacíos, y una lista
+   de «micrófono 1, micrófono 2» no ayuda a elegir: hasta entonces, no se
+   enseña la fila. */
+async function listarMicros() {
+  const sel = $("#aj-micro-disp");
+  let entradas = [];
+  try {
+    entradas = (await navigator.mediaDevices?.enumerateDevices() || [])
+                 .filter(d => d.kind === "audioinput" && d.label);
+  } catch {}
+  $("#aj-micro-fila-disp").hidden = entradas.length < 2;
+  sel.textContent = "";
+  const auto = document.createElement("option");
+  auto.value = "";
+  auto.textContent = "El que elija el sistema";
+  sel.appendChild(auto);
+  for (const d of entradas) {
+    const o = document.createElement("option");
+    o.value = d.deviceId;
+    o.textContent = d.label;
+    sel.appendChild(o);
+  }
+  const sigue = entradas.some(d => d.deviceId === aj.microDispositivo);
+  sel.value = sigue ? aj.microDispositivo : "";
+  if (!sigue && aj.microDispositivo) ponAjuste("microDispositivo", "");
+}
+
+function ponChip(chip, texto, tono) {
+  chip.textContent = texto;
+  chip.dataset.tono = tono;
+}
+
+async function pintarMicro() {
+  const chip = $("#aj-micro-chip");
+  const ayuda = $("#aj-micro-ayuda");
+  const permitir = $("#aj-micro-permitir");
+  const probar = $("#aj-micro-probar");
+
+  const impedimento = porQueNoPuedoGrabar();
+  if (impedimento) {
+    ponChip(chip, "no disponible", "no");
+    ayuda.classList.remove("suave");
+    ayuda.textContent = impedimento;
+    ayuda.hidden = false;
+    permitir.disabled = probar.disabled = true;
+    $("#aj-micro-fila-disp").hidden = true;
+    return;
+  }
+  permitir.disabled = probar.disabled = false;
+
+  const estado = await permisoMicro();
+  if (estado === "concedido") {
+    ponChip(chip, "concedido", "si");
+    ayuda.hidden = true;
+    permitir.textContent = "Volver a pedirlo";
+  } else if (estado === "denegado") {
+    ponChip(chip, "bloqueado", "no");
+    ayuda.classList.remove("suave");
+    ayuda.innerHTML = "El navegador lo tiene bloqueado para esta página, y desde " +
+                      "aquí no se puede levantar: hay que decírselo a él.<br>" +
+                      comoDesbloquearMicro();
+    ayuda.hidden = false;
+    permitir.textContent = "Probar de todos modos";
+  } else if (estado === "sin-micro") {
+    ponChip(chip, "no hay micrófono", "no");
+    ayuda.classList.remove("suave");
+    ayuda.textContent = "Este dispositivo no tiene ninguna entrada de audio conectada.";
+    ayuda.hidden = false;
+    permitir.textContent = "Permitir el micrófono";
+  } else {
+    ponChip(chip, estado === "sin-pedir" ? "sin conceder" : "por comprobar", "quiza");
+    ayuda.classList.add("suave");
+    ayuda.textContent = "Pulsa «Permitir el micrófono» y di que sí al aviso del " +
+                        "navegador. Solo lo pregunta una vez por página.";
+    ayuda.hidden = false;
+    permitir.textContent = "Permitir el micrófono";
+  }
+}
+
+/* ── Avisos del navegador ─────────────────────────────────────────────────
+   Celestia deja recados por su cuenta (`/pendientes`). Con el chat de fondo no
+   los ve nadie, así que se pueden sacar como notificación del sistema. */
+function pintarAvisos() {
+  const chip = $("#aj-avisos-chip");
+  const btn = $("#aj-avisos-permitir");
+  const ayuda = $("#aj-avisos-ayuda");
+  if (!("Notification" in window)) {
+    ponChip(chip, "no disponible", "no");
+    btn.disabled = true;
+    ayuda.classList.remove("suave");
+    ayuda.textContent = "Este navegador no sabe enseñar avisos del sistema.";
+    ayuda.hidden = false;
+    return;
+  }
+  btn.disabled = false;
+  const permiso = Notification.permission;
+  $("#aj-avisos-probar").hidden = !(permiso === "granted" && aj.avisos && pushListo);
+  if (permiso === "granted") {
+    ponChip(chip, aj.avisos ? "encendidos" : "concedidos, apagados", aj.avisos ? "si" : "quiza");
+    ayuda.hidden = true;
+    btn.textContent = aj.avisos ? "Apagar los avisos" : "Encender los avisos";
+  } else if (permiso === "denied") {
+    ponChip(chip, "bloqueados", "no");
+    ayuda.classList.remove("suave");
+    ayuda.innerHTML = "El navegador los tiene bloqueados para esta página. Se " +
+                      "levantan en el mismo sitio que el micrófono: candado junto " +
+                      "a la dirección → <b>Permisos → Notificaciones</b>.";
+    ayuda.hidden = false;
+    btn.textContent = "Permitir los avisos";
+  } else {
+    ponChip(chip, "sin conceder", "quiza");
+    ayuda.hidden = true;
+    btn.textContent = "Permitir los avisos";
+  }
+}
+
+async function alternarAvisos() {
+  if (!("Notification" in window)) return;
+  if (Notification.permission === "granted") {
+    ponAjuste("avisos", !aj.avisos);
+    brindar(aj.avisos ? "Avisos encendidos" : "Avisos apagados");
+    await (aj.avisos ? suscribirPush() : bajaPush());
+    pintarAvisos();
+    return;
+  }
+  try {
+    const r = await Notification.requestPermission();
+    ponAjuste("avisos", r === "granted");
+    brindar(r === "granted" ? "Avisos encendidos"
+                            : "El navegador no ha dado permiso para los avisos");
+    if (r === "granted") await suscribirPush();
+  } catch {}
+  pintarAvisos();
+}
+
+/* ── La app instalable ───────────────────────────────────────────────────
+   El service worker es lo que saca los avisos con la app CERRADA: Celestia
+   manda un push y Chrome lo despierta aunque no haya ninguna ventana. Sin él
+   (navegador viejo, o http desde otro aparato, que no lo permite) todo sigue
+   como antes: avisos sólo con el chat de fondo. */
+var registroSW = null;
+var pushListo = false;
+
+async function prepararApp() {
+  // En Pages no hay service worker que registrar: la app es la del móvil.
+  if (EN_PAGES || !("serviceWorker" in navigator)) return;
+  try {
+    registroSW = await navigator.serviceWorker.register("/sw.js", {scope: "/"});
+  } catch { return; }
+  // Si los avisos ya estaban encendidos, se renueva la suscripción: Chrome
+  // puede haberla cambiado, y a Celestia le vale con la última.
+  if (aj.avisos && "Notification" in window && Notification.permission === "granted") {
+    await suscribirPush();
+  }
+  pintarAvisos();
+}
+
+function claveBinaria(b64) {
+  const relleno = "=".repeat((4 - b64.length % 4) % 4);
+  const crudo = atob((b64 + relleno).replace(/-/g, "+").replace(/_/g, "/"));
+  return Uint8Array.from(crudo, (c) => c.charCodeAt(0));
+}
+
+async function suscribirPush() {
+  if (!registroSW || !("PushManager" in window)) return;
+  try {
+    const {clave} = await api("/push/clave", {ms: 10000});
+    let sus = await registroSW.pushManager.getSubscription();
+    if (!sus) {
+      sus = await registroSW.pushManager.subscribe({
+        userVisibleOnly: true, applicationServerKey: claveBinaria(clave)});
+    }
+    await api("/push/suscribir", {metodo: "POST", cuerpo: sus.toJSON(), ms: 10000});
+    pushListo = true;
+  } catch (e) {
+    pushListo = false;
+    console.warn("push:", e);
+  }
+}
+
+async function bajaPush() {
+  pushListo = false;
+  if (!registroSW) return;
+  try {
+    const sus = await registroSW.pushManager.getSubscription();
+    if (!sus) return;
+    await api("/push/baja", {metodo: "POST", cuerpo: {endpoint: sus.endpoint}, ms: 10000});
+    await sus.unsubscribe();
+  } catch {}
+}
+
+async function probarAviso() {
+  try {
+    await api("/push/probar", {metodo: "POST", ms: 10000});
+    brindar("Aviso enviado: cierra la app y mira si llega");
+  } catch (e) {
+    brindar(e.message);
+  }
+}
+
+/* Un aviso por lo que llega mientras el chat no se está mirando. Silencioso si
+   falta el permiso o la pestaña está delante: avisar de lo que ya se ve es
+   ruido. */
+function avisar(texto) {
+  if (!aj.avisos || !document.hidden) return;
+  if (!("Notification" in window) || Notification.permission !== "granted") return;
+  try {
+    new Notification("Celestia", {
+      body: texto.slice(0, 160),
+      icon: document.querySelector('link[rel="icon"]')?.href,
+      tag: "celestia",              // uno solo, que no se apilen veinte
+    });
+  } catch {}
+}
+
+/* Cómo responde Celestia — texto, voz o las dos. Esto NO es un ajuste del
+   navegador: vive en su perfil, se puede cambiar hablando («respóndeme solo
+   por voz») y hasta ahora no había dónde verlo. Alguien con `solo_voz` puesto
+   sin acordarse ve un chat que «no le escribe» y no tiene dónde mirarlo. */
+const MODOS = {
+  ambos:       "Te escribe, y te manda voz cuando se la pides.",
+  voz_siempre: "Te escribe y te manda la voz en cada respuesta.",
+  solo_texto:  "Solo te escribe; no manda audio.",
+  solo_voz:    "Solo te habla; las burbujas van sin texto.",
+};
+
+/* «voz_siempre» no existe en su perfil: por dentro es `ambos` más una petición
+   de voz que pone este chat en cada mensaje (`modo_voz`). Se separa así porque
+   el modo es de Celestia —vale para WhatsApp, Telegram y el terminal— y esto
+   es una preferencia de esta pantalla. */
+async function pintarModo() {
+  const sel = $("#aj-modo");
+  const pista = $("#aj-modo-pista");
+  try {
+    const p = await api("/perfil", {ms: 9000});
+    let modo = MODOS[p.modo_canal] ? p.modo_canal : "ambos";
+    if (modo === "ambos" && aj.vozSiempre) modo = "voz_siempre";
+    sel.value = modo;
+    sel.disabled = false;
+    pista.textContent = MODOS[modo];
+  } catch {
+    sel.disabled = true;
+    pista.textContent = "No he podido preguntárselo; ¿está encendida?";
+  }
+}
+
+async function ponerModo(elegido) {
+  const enPerfil = elegido === "voz_siempre" ? "ambos" : elegido;
+  try {
+    const r = await api("/perfil", {metodo: "POST", cuerpo: {modo_canal: enPerfil}, ms: 9000});
+    if (r.error) throw new Error(r.error);
+    ponAjuste("vozSiempre", elegido === "voz_siempre");
+    $("#aj-modo-pista").textContent = MODOS[elegido] || "";
+    brindar("Hecho");
+  } catch (e) {
+    brindar(e.message || "No he podido cambiarlo");
+    pintarModo();
+  }
+}
+
+/* ── El panel ─────────────────────────────────────────────────────────────── */
+async function abrirAjustes() {
+  // Si ya está abierto (o volviendo de irse), `abrirPanel` lo resuelve.
+  if ($("#panel-ajustes").open && !$("#panel-ajustes").dataset.cerrando) return;
+  montarSelectoresDeIdioma();                // los dos idiomas, al abrir
+  $("#aj-voz-auto").checked = aj.vozAuto;
+  $("#aj-voz-tope").value = String(aj.vozTope);
+  $("#aj-tema").value = temaGuardado();
+  $("#aj-texto").value = String(aj.textoEscala);
+  $("#aj-enter").checked = aj.enterEnvia;
+  pintarToken();
+  pintarAvisos();
+  $("#aj-modo-pista").textContent = "preguntándoselo…";
+  abrirPanel($("#panel-ajustes"));
+  pintarModo();
+  // Después de abrir: consultar el permiso es asíncrono y el panel no tiene
+  // por qué esperarlo para aparecer.
+  await pintarMicro();
+  await listarMicros();
+}
+
+function pintarToken() {
+  const chip = $("#aj-token-chip");
+  const hay = !!token();
+  ponChip(chip, hay ? "guardado" : "sin guardar", hay ? "si" : "quiza");
+  $("#aj-token-olvidar").disabled = !hay;
+}
+
+/* Lo que hay que saber cuando algo no va y se pide ayuda por fuera. Todo es
+   del navegador: ni una línea de la conversación. */
+async function copiarDiagnostico() {
+  const lineas = [
+    "Celestia · diagnóstico del chat",
+    "dirección: " + location.href.split("?")[0],
+    "contexto seguro: " + (window.isSecureContext ? "sí" : "no"),
+    "getUserMedia: " + (navigator.mediaDevices?.getUserMedia ? "sí" : "no"),
+    "MediaRecorder: " + (window.MediaRecorder ? "sí" : "no"),
+    "permiso del micrófono: " + await permisoMicro(),
+    "avisos: " + (("Notification" in window) ? Notification.permission : "no disponible"),
+    "navegador: " + navigator.userAgent,
+    "ajustes: " + JSON.stringify(aj),
+  ];
+  try {
+    await navigator.clipboard.writeText(lineas.join("\n"));
+    brindar("Diagnóstico copiado");
+  } catch {
+    // Sin portapapeles (pasa en http a secas) queda pintarlo en el hilo, que
+    // es de donde se puede copiar a mano.
+    cerrarPanel($("#panel-ajustes"));
+    const d = pintar("nota", "```\n" + lineas.join("\n") + "\n```");
+    d.dataset.crudo = lineas.join("\n");
+  }
+}
+
+/* ── La voz ───────────────────────────────────────────────────────────────
+   Se graba con MediaRecorder y se manda a `/audio`, que la transcribe con
+   Whisper y responde. El formato lo elige el navegador (webm en Chrome, mp4 en
+   Safari) y se le dice al backend, porque de la extensión depende con qué
+   decodificador la abre. */
+let grabadora = null, trozosVoz = [], t0Voz = 0, relojVoz = null;
+
+/* Por qué no se puede grabar, en cristiano y con la solución. Devuelve "" si
+   sí se puede. Antes esto era un booleano que dejaba el botón apagado sin más,
+   y desde fuera se ve igual que una app rota. */
+function porQueNoPuedoGrabar() {
+  if (!window.isSecureContext) {
+    // Desde otro aparato la página se sirve por http://192.168.x.x, y ningún
+    // navegador da el micrófono fuera de https (localhost es la excepción).
+    // Decirle «ábrelo en el mismo dispositivo» a quien acaba de entrar desde
+    // el portátil no es una solución, es cerrarle la puerta.
+    const fuera = !/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+    if (fuera) {
+      return "Estás entrando desde otro aparato (" + location.hostname + "), y el " +
+             "navegador solo da el micrófono en páginas https. Puedes escribir con " +
+             "normalidad, o mandarle un audio con el clip de adjuntar. Si quieres " +
+             "hablarle desde aquí, hace falta https (un túnel tipo Tailscale) o " +
+             "abrir el chat en el propio móvil donde corre Celestia.";
+    }
+    return "El navegador solo deja usar el micrófono en páginas seguras. " +
+           "Abre el chat en http://127.0.0.1:8765/chat o http://localhost:8765/chat " +
+           "(desde el mismo dispositivo donde corre Celestia).";
+  }
+  if (!navigator.mediaDevices?.getUserMedia) {
+    return "Este navegador no ofrece acceso al micrófono. Prueba con Chrome o Firefox.";
+  }
+  if (!window.MediaRecorder) {
+    return "Este navegador no sabe grabar audio. Prueba con Chrome o Firefox.";
+  }
+  return "";
+}
+
+function explicarMicro(motivo) {
+  $("#micro-motivo").textContent = motivo;
+  abrirPanel($("#panel-micro"));
+}
+
+/* Del aviso a los ajustes sin volver a buscar el engranaje: quien acaba de
+   toparse con el micrófono cerrado va justo ahí. */
+async function delMicroAAjustes() {
+  cerrarPanel($("#panel-micro"));
+  await abrirAjustes();
+}
+
+async function alternarMicro() {
+  if (grabadora) { pararVoz(); return; }
+  const impedimento = porQueNoPuedoGrabar();
+  if (impedimento) { explicarMicro(impedimento); return; }
+  let pista;
+  try {
+    pista = await abrirMicro();
+  } catch (e) {
+    // Cada motivo tiene su arreglo, y ninguno se resuelve reintentando: se
+    // dice cuál es y se deja la puerta abierta a Ajustes, que es donde está
+    // el camino para desbloquearlo.
+    explicarMicro(motivoMicro(e));
+    return;
+  }
+  trozosVoz = [];
+  const tipo = ["audio/webm", "audio/mp4", "audio/ogg"]
+    .find(t => MediaRecorder.isTypeSupported?.(t)) || "";
+  grabadora = new MediaRecorder(pista, tipo ? {mimeType: tipo} : undefined);
+  grabadora.ondataavailable = ev => { if (ev.data.size) trozosVoz.push(ev.data); };
+  grabadora.onstop = async () => {
+    pista.getTracks().forEach(p => p.stop());     // apaga el led del micro
+    const bloque = new Blob(trozosVoz, {type: grabadora.mimeType || "audio/webm"});
+    grabadora = null;
+    pintarBotonAccion();
+    if (bloque.size > 1200) await mandarVoz(bloque);
+    else brindar("Muy corto, no he grabado nada");
+  };
+  grabadora.start();
+  t0Voz = Date.now();
+  pintarBotonAccion();
+  $("#reloj-micro").classList.add("visible");
+  relojVoz = setInterval(() => {
+    const s = Math.floor((Date.now() - t0Voz) / 1000);
+    $("#reloj-micro").textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+    if (s >= aj.vozTope) pararVoz();              // el tope se elige en Ajustes
+  }, 250);
+}
+
+function pararVoz() {
+  clearInterval(relojVoz); relojVoz = null;
+  $("#reloj-micro").classList.remove("visible");
+  $("#reloj-micro").textContent = "0:00";
+  try { grabadora?.stop(); } catch {}
+  // `onstop` es asíncrono y aún tiene la grabadora en pie; el botón se repinta
+  // ahí y aquí, para que vuelva a su forma en cuanto sueltas.
+  setTimeout(pintarBotonAccion, 0);
+}
+
+async function mandarVoz(bloque) {
+  if (esperando) return;
+  const ext = (bloque.type.split("/")[1] || "webm").split(";")[0];
+  const b64 = await leerComoBase64(bloque);
+  const mio = pintar("yo", "🎙 nota de voz",
+                     {audio_b64: b64, audio_tipo: bloque.type || "audio/webm"});
+  mio.dataset.crudo = "🎙 nota de voz";
+  esperando = true;
+  t0Espera = Date.now();
+  pintarBotonAccion();
+  el.pensando.classList.add("activo");
+  orbeMini.redimensionar();
+  ponEstado("pensando");
+  orbe.latir(1);
+  abajo();
+  sonda = setInterval(mirarActividad, 420);
+  try {
+    const r = await api("/audio", {metodo: "POST",
+                                   cuerpo: {audio_b64: b64, formato: ext, canal: CANAL}});
+    if (r.error) throw new Error(r.error);
+    // Lo que entendió va en la burbuja tuya: una nota de voz muda con un
+    // reproductor no deja rastro de lo que dijiste.
+    if (r.transcripcion) {
+      mio.querySelector(".burbuja").firstChild.textContent = "🎙 " + r.transcripcion;
+      mio.dataset.crudo = "🎙 " + r.transcripcion;
+    }
+    // Las mismas ramas que al escribir: contestar con una imagen, con un
+    // documento o quedarse callada le puede pasar igual a una nota de voz.
+    const cuerpo = (r.texto || "").trim();
+    const hayAdjunto = !!(r.audio_b64 || r.imagen_b64 || r.documento_ruta);
+    if (cuerpo || hayAdjunto) {
+      const d = pintar("ella", cuerpo || "🔊 te contesta en voz", r);
+      d.dataset.crudo = cuerpo;
+    } else {
+      pintar("nota", "…se ha quedado callada.");
+    }
+    if (r.en_camino) pintar("nota", "Lo está preparando; te lo paso en cuanto esté.");
+    orbe.latir(0.8);
+  } catch (e) {
+    pintar("ella", e.message || "No he podido con el audio.", {error: true});
+    ponEstado("error");
+  } finally {
+    esperando = false;
+    clearInterval(sonda); sonda = null;
+    el.pensando.classList.remove("activo");
+    pintarBotonAccion();
+    setTimeout(() => { if (!esperando) { ponEstado("reposo"); saludarEstado(); } }, 700);
+  }
+}
+
+/* El botón de la derecha, según el momento. Nunca se deshabilita: un botón
+   apagado sin explicación es lo que hace pensar «no me deja mandar audios». Si
+   no se puede grabar, se pulsa igual y se dice por qué. */
+function pintarBotonAccion() {
+  // Las visitas no graban notas de voz: el botón es siempre el de enviar.
+  const hayQueMandar = VISITA || !!el.texto.value.trim() || !!imagenPendiente || !!archivoPendiente;
+  const glifo = el.accion.querySelector(".glifo");
+  if (grabadora) {
+    el.accion.classList.add("grabando");
+    glifo.textContent = "■";
+    el.accion.title = "Parar y enviar la nota";
+    el.accion.setAttribute("aria-label", "Parar y enviar");
+  } else {
+    el.accion.classList.remove("grabando");
+    glifo.textContent = hayQueMandar ? "↑" : "●";
+    el.accion.title = hayQueMandar ? "Enviar (Enter)" : "Grabar una nota de voz";
+    el.accion.setAttribute("aria-label", hayQueMandar ? "Enviar" : "Grabar");
+  }
+  el.accion.dataset.modo = grabadora ? "grabando" : (hayQueMandar ? "enviar" : "micro");
+}
+
+el.accion.onclick = () => {
+  if (el.accion.dataset.modo === "enviar") ejecutar();
+  else alternarMicro();
+};
+// El botón alterna sobre lo que se está viendo: pulsar desde «como el
+// sistema» fija el contrario de lo que hay delante, que es lo que se espera.
+$("#btn-tema").onclick = () => {
+  ponTema(document.documentElement.dataset.tema === "noche" ? "amanecer" : "noche");
+  $("#aj-tema").value = temaGuardado();
+};
+$("#btn-chats").onclick = abrirPanelChats;
+$("#chats-cerrar").onclick = () => cerrarPanel($("#panel-chats"));
+// Tocar fuera del cajón lo cierra, como en cualquier menú lateral. Un <dialog>
+// no lo hace solo: el clic en el fondo oscuro llega al propio diálogo, así que
+// hay que mirar si cayó dentro de su caja o no.
+$("#panel-chats").addEventListener("click", ev => {
+  const c = $("#panel-chats").getBoundingClientRect();
+  const dentro = ev.clientX >= c.left && ev.clientX <= c.right &&
+                 ev.clientY >= c.top && ev.clientY <= c.bottom;
+  if (!dentro) cerrarPanel($("#panel-chats"));
+});
+$("#chats-nuevo").onclick = chatNuevo;
+$("#btn-ajustes").onclick = abrirAjustes;
+$("#recargar-ya").onclick = () => location.reload();
+$("#micro-ajustes").onclick = delMicroAAjustes;
+$("#orbe").addEventListener("orbe:tocado", verEstado);
+$("#estado-cerrar").onclick = () => cerrarPanel($("#panel-estado"));
+$("#micro-cerrar").onclick = () => cerrarPanel($("#panel-micro"));
+$("#token-cancelar").onclick = () => cerrarPanel($("#panel-token"));
+$("#token-guardar").onclick = () => {
+  try { localStorage.setItem(LLAVE_TOKEN, $("#campo-token").value.trim()); } catch {}
+  cerrarPanel($("#panel-token"));
+  brindar("Token guardado");
+  saludarEstado();
+};
+$("#campo-token").addEventListener("keydown", ev => {
+  if (ev.key === "Enter") $("#token-guardar").click();
+});
+
+/* ── Los mandos de Ajustes ────────────────────────────────────────────────
+   Cada uno escribe su ajuste y punto: no hay «guardar» ni «descartar», porque
+   un panel de preferencias que se puede perder por cerrarlo mal es un panel
+   que nadie toca. */
+$("#ajustes-cerrar").onclick = () => cerrarPanel($("#panel-ajustes"));
+// Cerrar (con el botón o con Escape) apaga el micrófono de la prueba: se
+// escucha aquí y no en el botón para que ningún camino lo deje abierto.
+$("#panel-ajustes").addEventListener("close", pararPruebaMicro);
+
+$("#aj-micro-permitir").onclick = pedirMicro;
+$("#aj-micro-probar").onclick = alternarPruebaMicro;
+$("#aj-micro-disp").onchange = ev => {
+  ponAjuste("microDispositivo", ev.target.value);
+  // Con la prueba en marcha se reabre con el nuevo, que es justo para lo que
+  // se cambia de micrófono aquí.
+  if (pruebaMicro) { pararPruebaMicro(); alternarPruebaMicro(); }
+};
+$("#aj-avisos-permitir").onclick = alternarAvisos;
+$("#aj-avisos-probar").onclick = probarAviso;
+
+$("#aj-modo").onchange = ev => ponerModo(ev.target.value);
+$("#aj-voz-auto").onchange = ev => ponAjuste("vozAuto", ev.target.checked);
+$("#aj-voz-tope").onchange = ev => ponAjuste("vozTope", Number(ev.target.value));
+$("#aj-tema").onchange = ev => ponTema(ev.target.value);
+$("#aj-texto").onchange = ev => ponAjuste("textoEscala", Number(ev.target.value));
+$("#aj-enter").onchange = ev => ponAjuste("enterEnvia", ev.target.checked);
+$("#aj-ver-chats").onclick = () => {
+  cerrarPanel($("#panel-ajustes"));
+  abrirPanelChats();
+};
+
+$("#aj-token-cambiar").onclick = () => { cerrarPanel($("#panel-ajustes")); pedirToken(); };
+$("#aj-token-olvidar").onclick = () => {
+  try { localStorage.removeItem(LLAVE_TOKEN); } catch {}
+  pintarToken();
+  brindar("Token olvidado");
+  saludarEstado();
+};
+$("#aj-diagnostico").onclick = copiarDiagnostico;
+
+// Si el permiso se toca por fuera (en los ajustes del navegador), el panel se
+// entera solo en vez de quedarse enseñando «bloqueado» para siempre.
+navigator.permissions?.query({name: "microphone"})
+  .then(p => { p.onchange = () => { if ($("#panel-ajustes").open) pintarMicro(); }; })
+  .catch(() => {});
+
+// Con el tema «como el sistema», seguir al sistema cuando cambia de idea.
+// `addListener` es el nombre viejo; en Safari antiguo es el único que hay.
+(() => {
+  const claro = matchMedia("(prefers-color-scheme: light)");
+  const seguir = () => { if (temaGuardado() === "sistema") ponTema("sistema"); };
+  if (claro.addEventListener) claro.addEventListener("change", seguir);
+  else claro.addListener?.(seguir);
+})();
+
+// Atajos globales. Solo cuando no se está escribiendo, para no robarle teclas
+// a la conversación.
+addEventListener("keydown", ev => {
+  const escribiendo = document.activeElement === el.texto ||
+                      document.activeElement?.tagName === "INPUT";
+  // Con un panel delante las teclas son suyas: Escape lo cierra y lo de
+  // detrás no se toca.
+  if (document.querySelector("dialog[open]")) return;
+  if (escribiendo) return;
+  if (ev.key === "c" || ev.key === "C") { ev.preventDefault(); abrirPanelChats(); return; }
+  if (ev.key === "t" || ev.key === "T") $("#btn-tema").click();
+  if (ev.key === "a" || ev.key === "A") { ev.preventDefault(); abrirAjustes(); }
+  if (ev.key === "/") {
+    // Deja la barra escrita y la lista abierta. Antes solo enfocaba la caja:
+    // el atajo que anuncia el pie no llevaba a ninguna parte.
+    ev.preventDefault();
+    el.texto.focus();
+    el.texto.value = "/";
+    el.texto.dispatchEvent(new Event("input"));
+  }
+});
+
+// Al volver a la pestaña puede haber quedado correo sin recoger.
+addEventListener("visibilitychange", () => {
+  if (!document.hidden) { saludarEstado(); recogerPendientes(); }
+});
+
+/* ── El bucle ─────────────────────────────────────────────────────────────
+   Un solo `requestAnimationFrame` para todo. Con la pestaña oculta el
+   navegador ya lo frena, y aun así se comprueba: en un móvil, animar un canvas
+   en segundo plano es gastar batería a cambio de nada. */
+let tPrev = performance.now();
+
+function fotograma(ahora) {
+  requestAnimationFrame(fotograma);
+  if (document.hidden) { tPrev = ahora; return; }
+  const dt = Math.min(0.05, (ahora - tPrev) / 1000);
+  tPrev = ahora;
+
+  orbe.paso(dt);
+  orbe.dibujar();
+  if (orbePortada) {
+    orbePortada.paso(dt);
+    orbePortada.dibujar();
+  }
+  if (el.pensando.classList.contains("activo")) {
+    orbeMini.fase = orbe.fase;
+    orbeMini.paso(dt);
+    orbeMini.dibujar();
+  }
+}
+
+/* ── Arranque ─────────────────────────────────────────────────────────────── */
+(function arrancar() {
+  if (EN_PAGES) {
+    // La llave que guardó la página anterior de la web (antes de ser este chat).
+    try {
+      const vieja = localStorage.getItem("celestia_llave");
+      if (vieja && !token()) localStorage.setItem(LLAVE_TOKEN, vieja);
+    } catch {}
+    VISITA = !token();
+    if (VISITA) document.body.classList.add("visita");
+  }
+  // Lo primero: el resto del arranque (el tema, el hilo, el pie) ya consulta
+  // los ajustes.
+  cargarAjustes();
+  ponTema(temaGuardado());
+
+  // Un token en la URL (?token=…) se guarda y se borra de la barra de
+  // direcciones al momento: sirve para abrir el chat desde un enlace sin
+  // dejarlo escrito en el historial del navegador.
+  const url = new URL(location.href);
+  const tk = url.searchParams.get("token");
+  if (tk) {
+    try { localStorage.setItem(LLAVE_TOKEN, tk); } catch {}
+    url.searchParams.delete("token");
+    history.replaceState(null, "", url.pathname + url.search);
+  }
+
+  aplicarIdiomaApp();
+  ponEstado("reposo");
+  pintarBotonAccion();          // arranca en modo micrófono
+  // Siempre se entra a un chat nuevo. Lo anterior no se pierde: está en
+  // «Mis chats», que es donde se busca una conversación a propósito.
+  bienvenida();
+
+  requestAnimationFrame(fotograma);
+  prepararApp();
+  saludarEstado();
+  recogerPendientes();
+  vigia = setInterval(recogerPendientes, 5000);
+  setInterval(saludarEstado, 30000);
+  if (innerWidth > 620) el.texto.focus();
+})();
+</script>
+</body>
 </html>
