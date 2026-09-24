@@ -68,13 +68,13 @@ body {
 body {
   display: flex;
   flex-direction: column;
-  min-height: 100dvh;
+  height: 100dvh;
+  overflow: hidden;
   background: var(--fondo);
   color: var(--texto);
   font: 15px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
     "Helvetica Neue", sans-serif;
   overscroll-behavior: none;
-  overflow-x: hidden;
 }
 
 /* ── Cabecera con el orbe ─────────────────────────────────────────────── */
@@ -264,12 +264,15 @@ body {
   background: var(--texto);
   color: var(--fondo);
   font: inherit;
-  font-size: 17px;
   cursor: pointer;
   display: grid;
   place-items: center;
   transition: transform var(--t-toque) var(--curva),
     background var(--t-toque) ease;
+}
+
+.formulario button svg {
+  display: block;
 }
 
 .formulario button:hover {

@@ -9,6 +9,15 @@ import {
 
 const CLAVE_HISTORIAL = "celestia_visita_historial";
 
+const SALUDO =
+  "¡Hola! Soy Celestia. Como visita puedo charlar contigo de lo que quieras. ¿De qué hablamos?";
+
+function hayRaton() {
+  return (
+    typeof matchMedia === "function" && matchMedia("(pointer: fine)").matches
+  );
+}
+
 const estado = {
   url: null,
   historial: [],
@@ -88,6 +97,11 @@ function pintarMensaje(contenedor, mensaje) {
 
 function pintarHistorial(contenedor) {
   contenedor.replaceChildren();
+  if (estado.historial.length === 0) {
+    // Burbuja de bienvenida: sólo se pinta, nunca entra en el historial.
+    pintarMensaje(contenedor, { role: "assistant", content: SALUDO });
+    return;
+  }
   for (const mensaje of estado.historial) {
     pintarMensaje(contenedor, mensaje);
   }
@@ -111,7 +125,24 @@ function mostrarChat() {
 
   const boton = document.createElement("button");
   boton.type = "submit";
-  boton.textContent = "Enviar";
+  boton.setAttribute("aria-label", "Enviar");
+  boton.title = "Enviar";
+
+  const icono = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  icono.setAttribute("viewBox", "0 0 24 24");
+  icono.setAttribute("width", "20");
+  icono.setAttribute("height", "20");
+  icono.setAttribute("aria-hidden", "true");
+  icono.setAttribute("focusable", "false");
+  const flecha = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  flecha.setAttribute("d", "M12 19V5M12 5l-6 6M12 5l6 6");
+  flecha.setAttribute("fill", "none");
+  flecha.setAttribute("stroke", "currentColor");
+  flecha.setAttribute("stroke-width", "2");
+  flecha.setAttribute("stroke-linecap", "round");
+  flecha.setAttribute("stroke-linejoin", "round");
+  icono.appendChild(flecha);
+  boton.appendChild(icono);
 
   formulario.appendChild(campo);
   formulario.appendChild(boton);
@@ -133,8 +164,6 @@ function mostrarChat() {
     evento.preventDefault();
     manejarEnvio(campo, boton, conversacion);
   });
-
-  campo.focus();
 }
 
 function mostrarEscribiendo(contenedor) {
@@ -196,7 +225,7 @@ async function manejarEnvio(campo, boton, conversacion) {
   } finally {
     estado.esperando = false;
     boton.disabled = false;
-    campo.focus();
+    if (hayRaton()) campo.focus();
   }
 }
 
