@@ -1465,7 +1465,7 @@ const LLAVE_AJUSTES = "celestia.ajustes";
    `bp_chat.py` dentro del corchete, igual que los marcadores de marca.py: sin
    sustituir queda una lista vacía, que se une en "" y desactiva el aviso —
    que es lo que toca si la página se abrió como fichero suelto. */
-const VERSION_PAGINA = ["1790246969" ].join("");
+const VERSION_PAGINA = ["1790289445" ].join("");
 const CANAL = "web";              // por aquí entra y por aquí vuelve lo diferido
 
 const el = {
@@ -2519,7 +2519,8 @@ async function abrirChat(id) {
     // `hora()` espera milisegundos, así que una conversación de ayer salía
     // entera marcada a la hora de abrirla.
     const div = pintar(m.quien === "yo" ? "yo" : "ella", texto,
-                       {ts: (Number(m.ts) || 0) * 1000});
+                       {ts: (Number(m.ts) || 0) * 1000,
+                        ...(m.imagen_b64 ? {imagen_b64: m.imagen_b64} : {})});
     div.dataset.crudo = texto;
     if (QUIETO) { div.style.animation = "none"; return; }
     div.classList.add("restaurado");
