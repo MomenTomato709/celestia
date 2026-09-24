@@ -1,0 +1,20 @@
+{
+  "name": "Celestia",
+  "short_name": "Celestia",
+  "description": "Habla con Celestia como visita: no guarda lo que escribes.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0B0D17",
+  "theme_color": "#0B0D17",
+  "lang": "es",
+  "icons": [
+    {
+      "src": "favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

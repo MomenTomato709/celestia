@@ -2,13 +2,21 @@
 <html lang="es">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="theme-color" content="#0B0D17" />
     <title>Celestia</title>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+    <link rel="manifest" href="manifest.webmanifest" />
     <link rel="stylesheet" href="estilo.css" />
   </head>
   <body>
     <header class="cabecera">
-      <h1>Celestia</h1>
+      <span class="orbe" aria-hidden="true"></span>
+      <div class="titulo">
+        <h1 class="nombre">Celestia</h1>
+        <p class="pie-cabecera">visita</p>
+      </div>
     </header>
 
     <main id="pantalla" class="pantalla"></main>
