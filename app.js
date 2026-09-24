@@ -39,12 +39,31 @@ function mostrarApagada() {
   pantalla.appendChild(boton);
 }
 
+function normalizarMensaje(mensaje) {
+  if (!mensaje || typeof mensaje !== "object") return null;
+  if (typeof mensaje.content !== "string") {
+    // Formato viejo: {rol, texto}
+    if (typeof mensaje.texto !== "string") return null;
+    const rol = mensaje.rol === "user" ? "user" : mensaje.rol === "celestia" ? "assistant" : null;
+    if (!rol) return null;
+    return { role: rol, content: mensaje.texto };
+  }
+  if (mensaje.role !== "user" && mensaje.role !== "assistant") return null;
+  return { role: mensaje.role, content: mensaje.content };
+}
+
 function cargarHistorial() {
   try {
     const crudo = sessionStorage.getItem(CLAVE_HISTORIAL);
     if (!crudo) return [];
     const datos = JSON.parse(crudo);
-    return Array.isArray(datos) ? datos : [];
+    if (!Array.isArray(datos)) return [];
+    const limpio = [];
+    for (const mensaje of datos) {
+      const normalizado = normalizarMensaje(mensaje);
+      if (normalizado) limpio.push(normalizado);
+    }
+    return limpio;
   } catch {
     return [];
   }
@@ -60,9 +79,9 @@ function guardarHistorial() {
 
 function pintarMensaje(contenedor, mensaje) {
   const burbuja = document.createElement("div");
-  burbuja.className = "burbuja " + (mensaje.rol === "user" ? "usuario" : "celestia");
+  burbuja.className = "burbuja " + (mensaje.role === "user" ? "usuario" : "celestia");
   const texto = document.createElement("p");
-  texto.textContent = mensaje.texto;
+  texto.textContent = mensaje.content;
   burbuja.appendChild(texto);
   contenedor.appendChild(burbuja);
 }
@@ -151,7 +170,7 @@ async function manejarEnvio(campo, boton, conversacion) {
 
   ocultarAviso();
 
-  const mensajeUsuario = { rol: "user", texto };
+  const mensajeUsuario = { role: "user", content: texto };
   estado.historial.push(mensajeUsuario);
   guardarHistorial();
   pintarMensaje(conversacion, mensajeUsuario);
@@ -166,7 +185,7 @@ async function manejarEnvio(campo, boton, conversacion) {
     const recortado = recortarHistorial(estado.historial);
     const respuesta = await enviar(estado.url, recortado, fetch);
     quitarEscribiendo();
-    const mensajeCelestia = { rol: "celestia", texto: respuesta };
+    const mensajeCelestia = { role: "assistant", content: respuesta };
     estado.historial.push(mensajeCelestia);
     guardarHistorial();
     pintarMensaje(conversacion, mensajeCelestia);

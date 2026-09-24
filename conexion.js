@@ -53,8 +53,18 @@ export async function enviar(url, mensajes, fetch) {
   if (respuesta.status === 429) {
     throw new Error("Estoy atendiendo a mucha gente a la vez. Espera un poco.");
   }
-  if (respuesta.status === 400 || respuesta.status === 413) {
+  if (respuesta.status === 413) {
     throw new Error("Ese mensaje es demasiado largo.");
+  }
+  if (respuesta.status === 400) {
+    let mensaje = "";
+    try {
+      const datos = await respuesta.json();
+      mensaje = datos && typeof datos.error === "string" ? datos.error : "";
+    } catch {
+      mensaje = "";
+    }
+    throw new Error(mensaje || "No he podido mandar ese mensaje.");
   }
   if (respuesta.status === 503) {
     let mensaje = "";
@@ -76,7 +86,7 @@ export async function enviar(url, mensajes, fetch) {
 
 export function recortarHistorial(mensajes, max = 20) {
   let recortado = mensajes.slice(-max);
-  while (recortado.length > 0 && recortado[0].rol !== "user") {
+  while (recortado.length > 0 && recortado[0].role !== "user") {
     recortado = recortado.slice(1);
   }
   return recortado;

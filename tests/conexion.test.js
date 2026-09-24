@@ -148,7 +148,7 @@ test("enviar devuelve el texto de la respuesta", async () => {
     respuestaFalsa({ status: 200, json: { respuesta: "Hola, soy Celestia" } });
   const texto = await enviar(
     "https://abc.trycloudflare.com",
-    [{ rol: "user", texto: "hola" }],
+    [{ role: "user", content: "hola" }],
     fetch,
   );
   assert.equal(texto, "Hola, soy Celestia");
@@ -160,12 +160,16 @@ test("enviar hace POST a /visita/mensaje con JSON", async () => {
     capturada = { url, opciones };
     return respuestaFalsa({ status: 200, json: { respuesta: "ok" } });
   };
-  await enviar("https://abc.trycloudflare.com", [{ rol: "user", texto: "x" }], fetch);
+  await enviar(
+    "https://abc.trycloudflare.com",
+    [{ role: "user", content: "x" }],
+    fetch,
+  );
   assert.equal(capturada.url, "https://abc.trycloudflare.com/visita/mensaje");
   assert.equal(capturada.opciones.method, "POST");
   assert.equal(capturada.opciones.headers["Content-Type"], "application/json");
   assert.deepEqual(JSON.parse(capturada.opciones.body), {
-    mensajes: [{ rol: "user", texto: "x" }],
+    mensajes: [{ role: "user", content: "x" }],
   });
 });
 
@@ -177,11 +181,20 @@ test("enviar 429 lanza el mensaje de mucha gente", async () => {
   );
 });
 
-test("enviar 400 lanza el mensaje de demasiado largo", async () => {
+test("enviar 400 con error del servidor enseña ese texto", async () => {
+  const fetch = async () =>
+    respuestaFalsa({ ok: false, status: 400, json: { error: "Falta el mensaje" } });
+  await assert.rejects(
+    () => enviar("https://abc.trycloudflare.com", [], fetch),
+    /Falta el mensaje/,
+  );
+});
+
+test("enviar 400 sin error del servidor usa el mensaje genérico", async () => {
   const fetch = async () => respuestaFalsa({ ok: false, status: 400 });
   await assert.rejects(
     () => enviar("https://abc.trycloudflare.com", [], fetch),
-    /Ese mensaje es demasiado largo\./,
+    /No he podido mandar ese mensaje\./,
   );
 });
 
@@ -216,29 +229,29 @@ test("enviar fallo de red lanza el mensaje de apagada", async () => {
 
 test("recortarHistorial deja los últimos max", () => {
   const mensajes = Array.from({ length: 30 }, (_, i) => ({
-    rol: i % 2 === 0 ? "user" : "celestia",
-    texto: String(i),
+    role: i % 2 === 0 ? "user" : "assistant",
+    content: String(i),
   }));
   const recortado = recortarHistorial(mensajes, 20);
   assert.equal(recortado.length, 20);
-  assert.equal(recortado[0].texto, "10");
+  assert.equal(recortado[0].content, "10");
 });
 
 test("recortarHistorial quita hasta que el primero sea de user", () => {
   const mensajes = [
-    { rol: "celestia", texto: "a" },
-    { rol: "user", texto: "b" },
-    { rol: "celestia", texto: "c" },
+    { role: "assistant", content: "a" },
+    { role: "user", content: "b" },
+    { role: "assistant", content: "c" },
   ];
   const recortado = recortarHistorial(mensajes, 20);
-  assert.equal(recortado[0].rol, "user");
+  assert.equal(recortado[0].role, "user");
   assert.equal(recortado.length, 2);
 });
 
 test("recortarHistorial con max por defecto 20", () => {
   const mensajes = Array.from({ length: 25 }, (_, i) => ({
-    rol: "user",
-    texto: String(i),
+    role: "user",
+    content: String(i),
   }));
   assert.equal(recortarHistorial(mensajes).length, 20);
 });
