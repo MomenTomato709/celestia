@@ -1,0 +1,173 @@
+:root {
+  --fondo: #0f1220;
+  --fondo-suave: #1a1f36;
+  --texto: #eef1ff;
+  --texto-suave: #a9b0d0;
+  --acento: #7c8cff;
+  --usuario: #3a4bd6;
+  --celestia: #262c48;
+  --aviso: #ffb4b4;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+  background: var(--fondo);
+  color: var(--texto);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.cabecera {
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--fondo-suave);
+}
+
+.cabecera h1 {
+  margin: 0;
+  font-size: 1.25rem;
+  letter-spacing: 0.02em;
+}
+
+.pantalla {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 1rem;
+  gap: 1rem;
+  overflow: hidden;
+}
+
+.estado {
+  margin: auto;
+  text-align: center;
+  color: var(--texto-suave);
+}
+
+.pantalla button {
+  display: block;
+  margin: 0 auto;
+  padding: 0.6rem 1.2rem;
+  border: none;
+  border-radius: 999px;
+  background: var(--acento);
+  color: #fff;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.pantalla button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.conversacion {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  overflow-y: auto;
+  padding-right: 0.25rem;
+}
+
+.burbuja {
+  max-width: 80%;
+  padding: 0.6rem 0.9rem;
+  border-radius: 1rem;
+  word-wrap: break-word;
+  overflow-wrap: anywhere;
+}
+
+.burbuja p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.burbuja.usuario {
+  align-self: flex-end;
+  background: var(--usuario);
+  border-bottom-right-radius: 0.25rem;
+}
+
+.burbuja.celestia {
+  align-self: flex-start;
+  background: var(--celestia);
+  border-bottom-left-radius: 0.25rem;
+}
+
+.burbuja.escribiendo {
+  color: var(--texto-suave);
+  font-style: italic;
+}
+
+.formulario {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-end;
+}
+
+.formulario textarea {
+  flex: 1;
+  resize: none;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--fondo-suave);
+  border-radius: 0.75rem;
+  background: var(--fondo-suave);
+  color: var(--texto);
+  font: inherit;
+  max-height: 8rem;
+}
+
+.formulario textarea:focus {
+  outline: 2px solid var(--acento);
+  outline-offset: 1px;
+}
+
+.formulario button {
+  padding: 0.6rem 1rem;
+  border: none;
+  border-radius: 0.75rem;
+  background: var(--acento);
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+
+.formulario button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.aviso {
+  margin: 0 1rem 0.5rem;
+  padding: 0.6rem 0.9rem;
+  border-radius: 0.75rem;
+  background: rgba(255, 180, 180, 0.12);
+  color: var(--aviso);
+  font-size: 0.9rem;
+}
+
+.pie {
+  padding: 0.75rem 1.25rem 1rem;
+  border-top: 1px solid var(--fondo-suave);
+}
+
+.nota {
+  margin: 0;
+  text-align: center;
+  color: var(--texto-suave);
+  font-size: 0.8rem;
+}
