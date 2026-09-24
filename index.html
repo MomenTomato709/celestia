@@ -15,7 +15,7 @@
 <head>
 <meta name="celestia-pages" content="1">
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <meta name="color-scheme" content="dark light">
 <meta name="theme-color" content="#0B0D17">
 <link rel="manifest" href="/manifest.webmanifest">
@@ -1465,7 +1465,7 @@ const LLAVE_AJUSTES = "celestia.ajustes";
    `bp_chat.py` dentro del corchete, igual que los marcadores de marca.py: sin
    sustituir queda una lista vacía, que se une en "" y desactiva el aviso —
    que es lo que toca si la página se abrió como fichero suelto. */
-const VERSION_PAGINA = ["1790246421" ].join("");
+const VERSION_PAGINA = ["1790246969" ].join("");
 const CANAL = "web";              // por aquí entra y por aquí vuelve lo diferido
 
 const el = {
@@ -2055,6 +2055,7 @@ async function enviar(texto) {
   sonda = setInterval(mirarActividad, 420);
 
   try {
+    if (VISITA && token()) { location.reload(); return; }
     if (VISITA) {
       if (!texto.trim()) { pintar("nota", "Como visita solo puedo leer texto."); return; }
       // El historial vive sólo en esta pestaña; la puerta no guarda nada.
@@ -3679,6 +3680,12 @@ function fotograma(ahora) {
     } catch {}
     VISITA = !token();
     if (VISITA) document.body.classList.add("visita");
+    // Si la llave llega con la página ya abierta (el enlace «#t=…» en la misma
+    // pestaña no recarga), se recarga para entrar como dueño y no seguir de
+    // visita (Codex, 24 sep 2026).
+    addEventListener("hashchange", () => {
+      if (VISITA && /[#&]t=/.test(location.hash)) location.reload();
+    });
   }
   // Lo primero: el resto del arranque (el tema, el hilo, el pie) ya consulta
   // los ajustes.
