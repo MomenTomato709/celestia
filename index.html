@@ -337,6 +337,11 @@ header {
 }
 #orbe-portada:active { cursor: grabbing; }
 #bienvenida p.vacio { color: var(--texto-apagado); margin: 0; font-size: 13px; }
+#bienvenida p.sin-cerebro { color: var(--texto); font-size: 14px; line-height: 1.5;
+  max-width: 420px; margin: 0 auto; text-align: left; }
+#bienvenida p.sin-cerebro ol { margin: 8px 0; padding-left: 22px; }
+#bienvenida p.sin-cerebro a { color: var(--acento, var(--c-violeta)); }
+#bienvenida p.sin-cerebro span { color: var(--texto-apagado); font-size: 13px; }
 
 /* ── El redactor ────────────────────────────────────────────────────────── */
 footer {
@@ -1465,7 +1470,7 @@ const LLAVE_AJUSTES = "celestia.ajustes";
    `bp_chat.py` dentro del corchete, igual que los marcadores de marca.py: sin
    sustituir queda una lista vacía, que se une en "" y desactiva el aviso —
    que es lo que toca si la página se abrió como fichero suelto. */
-const VERSION_PAGINA = ["1790289445" ].join("");
+const VERSION_PAGINA = ["1790994100" ].join("");
 const CANAL = "web";              // por aquí entra y por aquí vuelve lo diferido
 
 const el = {
@@ -2111,6 +2116,12 @@ async function enviar(texto) {
     }
     const r = await api("/mensaje", {metodo: "POST", cuerpo: cuerpoPeticion});
     if (r.error) throw new Error(r.error);
+    // Era una clave de IA (buena o no): que no se quede a la vista.
+    if (r.era_clave) {
+      const b = div.querySelector(".burbuja");
+      if (b) b.textContent = "Clave de IA (oculta)";
+      div.dataset.crudo = "";
+    }
     const cuerpo = (r.texto || "").trim();
     const hayAdjunto = !!(r.audio_b64 || r.imagen_b64 || r.documento_ruta);
     if (cuerpo || hayAdjunto) {
@@ -2168,7 +2179,11 @@ async function saludarEstado() {
   try {
     const s = await api("/estado", {ms: 8000});
     const modelo = s.modelo || s.backend || (s.checks && s.checks.modelo) || "";
-    ponPie(modelo ? "en línea · " + modelo : "en línea", "enlinea");
+    sinCerebro = !!s.sin_cerebro && !VISITA;
+    // Sin clave, el nombre del modelo es el de por defecto y no lo usa nadie.
+    ponPie(sinCerebro ? "en línea · falta la clave de IA"
+                      : (modelo ? "en línea · " + modelo : "en línea"), "enlinea");
+    if (sinCerebro) portadaSinCerebro();
     // Si el daemon sirve una página distinta de la que hay abierta, esta copia
     // se ha quedado atrás. No se recarga sola: cortar una conversación a
     // media frase sería peor que el problema que arregla.
@@ -2663,6 +2678,34 @@ function ajustarAlto() {
   el.texto.style.height = Math.min(el.texto.scrollHeight, 168) + "px";
 }
 
+/* Recién instalada y sin clave de IA: la portada dice cómo conseguir una en
+   vez de «Sin mensajes todavía», y la clave se pega en el chat como un mensaje
+   más (el servidor la reconoce y no la guarda en el historial). */
+let sinCerebro = false;
+function portadaSinCerebro() {
+  const p = document.querySelector("#bienvenida p.vacio");
+  if (!p) return;
+  const enlace = (url, texto) => {
+    const a = document.createElement("a");
+    a.href = url; a.textContent = texto; a.target = "_blank"; a.rel = "noopener";
+    return a;
+  };
+  p.textContent = "";
+  p.classList.add("sin-cerebro");
+  const t = document.createElement("strong");
+  t.textContent = "Para empezar necesito una clave de IA gratis:";
+  const ol = document.createElement("ol");
+  const li = (...partes) => { const e = document.createElement("li"); e.append(...partes); ol.appendChild(e); };
+  li("Entra en ", enlace("https://aistudio.google.com/apikey", "aistudio.google.com/apikey"),
+     " con tu cuenta de Google.");
+  li("Pulsa «Create API key» y cópiala.");
+  li("Pégala aquí abajo y envíala.");
+  const extra = document.createElement("span");
+  extra.append("¿Más rápida? También vale una de Groq: ",
+               enlace("https://console.groq.com/keys", "console.groq.com/keys"), ".");
+  p.append(t, ol, extra);
+}
+
 function bienvenida() {
   if (el.hilo.querySelector(".msg")) return;
   document.getElementById("bienvenida")?.remove();   // nunca dos portadas
@@ -2687,6 +2730,7 @@ function bienvenida() {
   // mientras decide qué preguntar.
   orbePortada.siempreDespierto = true;
   orbePortada.ponEstado(orbe.estado);
+  if (sinCerebro) portadaSinCerebro();
 }
 
 /* ── Sucesos ──────────────────────────────────────────────────────────────── */
