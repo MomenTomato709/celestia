@@ -3888,7 +3888,8 @@ async function mandarVoz(bloque) {
   sonda = setInterval(mirarActividad, 420);
   try {
     const r = await api("/audio", {metodo: "POST",
-                                   cuerpo: {audio_b64: b64, formato: ext, canal: CANAL}});
+                                   cuerpo: {audio_b64: b64, formato: ext, canal: CANAL,
+                                            hilo: hiloActual}});
     if (r.error) throw new Error(r.error);
     // Lo que entendió va en la burbuja tuya: una nota de voz muda con un
     // reproductor no deja rastro de lo que dijiste.

@@ -55,6 +55,12 @@ cd "primp-$VERSION"
 # Sin abi3: un .so para Python 3.12 exacto, enlazado con libpython3.12.
 sed -i 's/"abi3-py310", //' crates/primp-python/Cargo.toml
 grep -q abi3 crates/primp-python/Cargo.toml && { echo "✗ sigue con abi3"; exit 1; }
+# Sin el DNS propio (hickory): en Android quiere el «contexto» de Java para
+# leer los servidores del sistema (ndk-context) y, como nadie se lo da, la
+# primera búsqueda moría con «android context was not initialized» (visto en
+# el emulador, 4 oct 2026). Sin él, primp usa el DNS normal del sistema.
+sed -i '/"hickory-dns",/d' crates/primp-python/Cargo.toml
+grep -q hickory crates/primp-python/Cargo.toml && { echo "✗ sigue con hickory"; exit 1; }
 
 cat > pyo3.cfg <<EOF
 implementation=CPython

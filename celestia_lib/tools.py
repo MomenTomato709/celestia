@@ -691,8 +691,14 @@ class AgentTools:
         try:
             resultados = DDGS(timeout=10).text(query, region="es-es", max_results=8,
                                                backend="auto") or []
-        except Exception as e:
-            logger.info("ddgs no respondió (%s) — sigue la cadena", str(e)[:120])
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except BaseException as e:
+            # BaseException y no Exception: un fallo dentro de primp (Rust)
+            # llega como PanicException, que no hereda de Exception, y se
+            # llevaba por delante la petición entera (visto en Android).
+            logger.info("ddgs no respondió (%s: %s) — sigue la cadena",
+                        type(e).__name__, str(e)[:120])
             return ""
         filas, urls = [], []
         for res in resultados:

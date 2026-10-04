@@ -295,7 +295,8 @@ def desenrollar_brazo(img):
     """
     import numpy as np
     from PIL import Image
-    from scipy import ndimage
+    from .ndimage_lite import ndimage_o_lite     # la app de Android no tiene scipy
+    ndimage = ndimage_o_lite()
 
     # Para un calco sobra, y el desenrollado es lo que más RAM pide: a 2000 px
     # el pico medido eran 341 MB (revisión de Codex); a 1200, una fracción.
@@ -400,7 +401,8 @@ def tinta(datos, umbral: float = NIVELES_TINTA[NIVEL_DEFECTO],
     """
     import numpy as np
     from PIL import Image
-    from scipy import ndimage
+    from .ndimage_lite import ndimage_o_lite     # la app de Android no tiene scipy
+    ndimage = ndimage_o_lite()
 
     # Pico medido: ~100 MB extra con 2000 px. Se suelta el color en cuanto se
     # han sacado el gris y la saturación (revisión de Codex).
@@ -445,7 +447,8 @@ def lineas(datos: bytes):
     """Sólo los contornos, negro sobre blanco. Para fotos (no dibujos)."""
     import numpy as np
     from PIL import Image
-    from scipy import ndimage
+    from .ndimage_lite import ndimage_o_lite     # la app de Android no tiene scipy
+    ndimage = ndimage_o_lite()
 
     gris = np.asarray(_abrir(datos), dtype=np.float32)
     lado = max(gris.shape)

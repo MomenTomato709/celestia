@@ -151,6 +151,13 @@ def crear(api) -> Blueprint:
             payload["en_camino"] = True
         return jsonify(payload)
 
+    def flask_request_context(cuerpo: dict):
+        """Una petición a /mensaje hecha desde dentro (la nota de voz), con la
+        dirección de quien la mandó de verdad."""
+        return api.app.test_request_context(
+            "/mensaje", method="POST", json=cuerpo,
+            environ_base={"REMOTE_ADDR": flask_request.remote_addr or "127.0.0.1"})
+
     @bp.route("/mensaje", methods=["POST"])
     def mensaje():
         data             = flask_request.get_json(force=True, silent=True)
@@ -1218,33 +1225,40 @@ def crear(api) -> Blueprint:
             return jsonify({"texto": oido.explicar(getattr(api, "_motivo_sin_oido", "")),
                             "audio_b64": None, "transcripcion": ""})
         logger.info("WA ← audio→texto: %.60s", transcripcion)
-        texto = transcripcion
+        # Lo dicho sigue EXACTAMENTE el camino de lo escrito (/mensaje). Antes
+        # iba directo al modelo y se saltaba las herramientas: «recuérdame en un
+        # minuto beber agua» por voz contestaba «[RECORDATORIO: se ha creado…]»
+        # sin crear nada (el modelo lo fingía; visto en la prueba del 4 oct
+        # 2026). Lo mismo con las claves pegadas, los filtros, la búsqueda…
+        # El chat de la nota es el que estaba abierto (si no lo dice, el
+        # activo: pasar None lo cambiaría al de por defecto).
+        hilo_activo = getattr(api.orch, "hilo_actual", None)
+        cuerpo = {"texto": transcripcion, "canal": canal_origen, "modo_voz": True,
+                  "hilo": data.get("hilo") or (hilo_activo if isinstance(hilo_activo, str) else None),
+                  "remitente": data.get("remitente")}
         if ctx_pantalla:
-            texto = f"{texto}\n\n[PANTALLA ACTUAL]\n{ctx_pantalla}"
-        max_tok = 400 if not ctx_pantalla else 600
-        if PIDE_EXTENSION_RE.search(transcripcion):
-            max_tok = max(max_tok, MAX_TOKENS_EXTENSO)
-        with api._lock:
-            respuesta = api.orch.respond(texto, stream=False, max_tokens=max_tok)
-        respuesta = api._sanitizar_respuesta(respuesta)
-        respuesta = api._ajustar_genero_propio(respuesta)
-        logger.info("WA → %.60s", respuesta)
-        # Respetar modo_canal del perfil incluso cuando el input fue audio:
-        #   - solo_voz   → solo audio (texto vacío)
-        #   - solo_texto → solo texto (sin audio)
-        #   - ambos      → audio + texto (comportamiento histórico)
+            cuerpo["contexto_pantalla"] = ctx_pantalla
+        with flask_request_context(cuerpo):
+            resp = mensaje()
+        estado_http = 200
+        if isinstance(resp, tuple):
+            resp, estado_http = resp[0], resp[1]
+        salida = resp.get_json(silent=True) or {}
+        if estado_http >= 400:
+            return jsonify(salida), estado_http
+        # Voz de vuelta, como siempre con una nota de voz: si la respuesta salió
+        # por un atajo sin audio (una herramienta), se le pone aquí. Respetando
+        # el perfil: solo_texto → sin audio; solo_voz → sin texto si hay audio.
         modo_canal = api._perfil.modo_canal
-        salida: dict = {}
-        texto_resp = respuesta
-        if modo_canal != "solo_texto":
-            if _adjuntar_audio(salida, api._sintetizar(respuesta)) \
+        if modo_canal != "solo_texto" and not salida.get("audio_b64") and salida.get("texto"):
+            if _adjuntar_audio(salida, api._sintetizar(salida["texto"])) \
                     and modo_canal == "solo_voz":
-                texto_resp = ""
+                salida["texto"] = ""
+        logger.info("WA → %.60s", salida.get("texto") or "(audio)")
         # Lo que se entendió va también en la respuesta, para que el chat pueda
         # enseñar en pantalla lo que dijiste en vez de una burbuja muda con un
         # reproductor.
         salida["transcripcion"] = transcripcion
-        salida["texto"] = texto_resp
         salida.setdefault("audio_b64", None)
         return jsonify(salida)
 

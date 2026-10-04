@@ -54,7 +54,8 @@ def circulos(png: bytes, zona: Optional[Tuple[float, float, float, float]] = Non
     try:
         import numpy as np
         from PIL import Image
-        from scipy import ndimage
+        from .ndimage_lite import ndimage_o_lite  # la app de Android no tiene scipy
+        ndimage = ndimage_o_lite()
     except ImportError as e:                       # pragma: no cover
         logger.warning("sin numpy/scipy/PIL no puedo buscar botones (%s)", e)
         return []
