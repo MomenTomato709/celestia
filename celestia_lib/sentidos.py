@@ -147,11 +147,32 @@ def probar(api) -> Dict[str, Any]:
     except Exception as e:
         pruebas["hablar"] = f"fallo: {e}"
     pruebas["hablar_s"] = round(_time.time() - inicio, 1)
+    # El motor del metabuscador (primp) contra una web fija: TLS, DNS y HTTP
+    # sin depender de que un buscador tenga el día (en la app de Android es una
+    # rueda fabricada aparte y es lo primero que se rompería).
     inicio = _time.time()
     try:
+        import primp
+        respuesta = primp.Client(timeout=20).get("https://www.google.com/generate_204")
+        pruebas["primp"] = int(getattr(respuesta, "status_code", 0))
+    except BaseException as e:                       # un pánico de Rust es BaseException
+        if isinstance(e, (KeyboardInterrupt, SystemExit)):
+            raise
+        pruebas["primp"] = f"fallo: {type(e).__name__}: {e}"
+    pruebas["primp_s"] = round(_time.time() - inicio, 1)
+    # Y el buscador de verdad. Los buscadores a veces frenan un rato a una
+    # máquina (las de GitHub, sobre todo): tres intentos con preguntas distintas.
+    inicio = _time.time()
+    pruebas["buscar"] = 0
+    try:
         from .tools import AgentTools
-        texto = AgentTools(None)._ddgs("Celestia inteligencia artificial")
-        pruebas["buscar"] = len([l for l in texto.splitlines() if l.strip()])
+        for consulta in ("Celestia inteligencia artificial", "capital de Francia",
+                         "receta de tortilla de patatas"):
+            texto = AgentTools(None)._ddgs(consulta)
+            pruebas["buscar"] = len([l for l in texto.splitlines() if l.strip()])
+            if pruebas["buscar"]:
+                break
+            _time.sleep(3)
     except Exception as e:
         pruebas["buscar"] = f"fallo: {e}"
     pruebas["buscar_s"] = round(_time.time() - inicio, 1)
@@ -163,10 +184,24 @@ def _dibujar() -> Dict[str, Any]:
             "falta": "", "claves": []}
 
 
+def _manos() -> Dict[str, Any]:
+    """Manejar el aparato: en un PC, pc.py; en el móvil de Termux, Shizuku."""
+    from .paths import ES_ANDROID
+    if not ES_ANDROID:
+        return {"ok": True, "como": "abrir y cerrar programas, el volumen, mirar la pantalla",
+                "falta": "", "claves": []}
+    if os.environ.get("CELESTIA_APP_ANDROID") == "1":
+        return {"ok": False, "como": "",
+                "falta": "desde la app todavía no manejo el móvil (en Termux, con Shizuku, sí)",
+                "claves": []}
+    return {"ok": True, "como": "el móvil, con Shizuku", "falta": "", "claves": []}
+
+
 def estado(api=None) -> List[Dict[str, Any]]:
     sentidos = [("pensar", "Pensar", _pensar()), ("ver", "Ver", _ver(api)),
                 ("oir", "Oír", _oir()), ("hablar", "Hablar", _hablar()),
-                ("buscar", "Buscar", _buscar()), ("dibujar", "Dibujar", _dibujar())]
+                ("buscar", "Buscar", _buscar()), ("dibujar", "Dibujar", _dibujar()),
+                ("manos", "Manos", _manos())]
     return [{"id": i, "nombre": n, **d} for i, n, d in sentidos]
 
 

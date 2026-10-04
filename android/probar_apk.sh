@@ -52,8 +52,10 @@ assert sentidos["hablar"]["ok"], sentidos["hablar"]
 assert s["pruebas"]["hablar"] is True, s["pruebas"]
 print("✓ habla (edge-tts dentro de la app)")
 assert sentidos["buscar"]["como"] == "varios buscadores a la vez", sentidos["buscar"]
+assert s["pruebas"]["primp"] in (200, 204), s["pruebas"]
+print("✓ primp (el motor del metabuscador) funciona dentro de la app")
 assert isinstance(s["pruebas"]["buscar"], int) and s["pruebas"]["buscar"] > 0, s["pruebas"]
-print("✓ busca con el metabuscador (primp para Android)")
+print("✓ busca con el metabuscador")
 EOF
 adb logcat -d > prueba/logcat.txt
 echo "✓ la APK funciona"

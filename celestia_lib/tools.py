@@ -3953,6 +3953,15 @@ class AgentTools:
         destino.mkdir(parents=True, exist_ok=True)
         ruta = destino / f"pantalla_{ts}.png"
 
+        if not ES_ANDROID:
+            # Windows y Mac (y Linux con X) sin programas aparte: con Pillow,
+            # que ya va en el instalador. En Windows no había ningún camino.
+            from . import pc
+            png = pc.captura()
+            if png:
+                ruta.write_bytes(png)
+                return f"__IMAGEN__:{ruta}|✓ Captura de la pantalla ({len(png) // 1024}KB)"
+
         candidatos = [
             ("termux-screencap", [str(ruta)]),
             ("screencapture", ["-x", str(ruta)]),
@@ -4173,6 +4182,9 @@ class AgentTools:
         "cambiar_volumen", "cambiar_brillo", "tarea_autonoma",
     })
 
+    # De ésas, las que en un ordenador sí tienen sentido y hace pc.py.
+    _EN_UN_PC = frozenset({"abrir_app", "cerrar_app", "cambiar_volumen"})
+
     @staticmethod
     def _no_es_android(tool: str) -> str:
         sistema = {"win32": "Windows", "darwin": "un Mac"}.get(sys.platform, "un ordenador")
@@ -4267,6 +4279,15 @@ class AgentTools:
         fn = dispatch.get(tool)
         if fn is None:
             return f"Herramienta desconocida: {tool}"
+        if tool in self._EN_UN_PC and not ES_ANDROID:
+            # En un ordenador, abrir/cerrar programas y el volumen los hace pc.py
+            # (4 oct 2026; antes contestaba «sólo funciona en un móvil»).
+            from . import pc
+            hacer_en_pc = {"abrir_app": lambda: pc.abrir(params.get("app", "")),
+                           "cerrar_app": lambda: pc.cerrar(params.get("app", "")),
+                           "cambiar_volumen": lambda: pc.volumen(params.get("accion", "up"))}
+            with actividad.fase(*_fase_de_tool(tool)):
+                return hacer_en_pc[tool]()
         if tool in self._SOLO_ANDROID and not ES_ANDROID:
             return self._no_es_android(tool)
         try:
