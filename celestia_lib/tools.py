@@ -700,22 +700,77 @@ class AgentTools:
             logger.info("ddgs no respondió (%s: %s) — sigue la cadena",
                         type(e).__name__, str(e)[:120])
             return ""
-        filas, urls = [], []
+        pares = []                                   # (fila, url) en el orden del buscador
         for res in resultados:
             titulo = self._texto_plano(res.get("title") or "")
             cuerpo = self._texto_plano(res.get("body") or "")
             if cuerpo and len(cuerpo) <= 30:
                 cuerpo = ""
             fila = f"{titulo} — {cuerpo}" if (titulo and cuerpo) else (titulo or cuerpo)
+            url = str(res.get("href") or "")
             if fila:
-                filas.append(fila)
-            if str(res.get("href") or "").startswith("http"):
-                urls.append(res["href"])
-        if not filas:
+                pares.append((fila, url if url.startswith("http") else ""))
+        if not pares:
             return ""
-        self._ultimas_urls = urls[:5]
+        if self._PIDE_ACTUALIDAD_RE.search(query or ""):
+            pares = self._lo_mas_reciente_primero(pares)
+        filas = [f for f, _u in pares]
+        self._ultimas_urls = [u for _f, u in pares if u][:5]
         logger.info("ddgs respondió (%d resultados)", len(filas))
         return "\n".join(self._primero_los_que_traen_el_dato(query, filas))
+
+    # ── Lo más reciente primero ─────────────────────────────────────────
+    # 4 oct 2026, «¿quién ganó el último Gran Premio de Fórmula 1?»: entre los
+    # resultados estaba la carrera de esa misma mañana («11 hours ago»), pero
+    # detrás de las de agosto y septiembre, y el modelo contestó con la de
+    # agosto. Los buscadores ponen la fecha delante del resumen («Aug 23, 2026
+    # ·», «11 hours ago ·», «hace 3 días ·»): con una pregunta de actualidad,
+    # los que la llevan se ordenan del más nuevo al más viejo; los que no la
+    # llevan (una ficha de Wikipedia) van detrás, en su orden.
+    _MESES_FECHA = {"jan": 1, "ene": 1, "feb": 2, "mar": 3, "apr": 4, "abr": 4, "may": 5,
+                    "jun": 6, "jul": 7, "aug": 8, "ago": 8, "sep": 9, "set": 9, "oct": 10,
+                    "nov": 11, "dec": 12, "dic": 12}
+    _HACE_RE = re.compile(
+        r"\b(?:(\d+)\s+(minute|hour|day|week|month)s?\s+ago|"
+        r"hace\s+(\d+)\s+(minuto|hora|d[ií]a|semana|mes)(?:s|es)?)\b", re.IGNORECASE)
+    _FECHA_EN_RE = re.compile(r"\b([A-Za-z]{3})[a-z]*\.?\s+(\d{1,2}),\s+(\d{4})\b")
+    _FECHA_ES_RE = re.compile(r"\b(\d{1,2})\s+(?:de\s+)?([a-zA-Z]{3})[a-z]*\.?\s+(?:de\s+)?(\d{4})\b")
+
+    @classmethod
+    def _fecha_del_resultado(cls, fila: str) -> Optional[float]:
+        """La fecha (como marca de tiempo) que el buscador puso al resultado."""
+        cabeza = fila.split(" — ", 1)[-1][:60]          # la fecha va al principio del resumen
+        m = cls._HACE_RE.search(cabeza)
+        if m:
+            n = int(m.group(1) or m.group(3))
+            unidad = (m.group(2) or m.group(4) or "").lower()[:3]
+            segundos = {"min": 60, "hou": 3600, "hor": 3600, "day": 86400, "día": 86400,
+                        "dia": 86400, "wee": 604800, "sem": 604800, "mon": 2592000,
+                        "mes": 2592000}.get(unidad, 86400)
+            return time.time() - n * segundos
+        for patron, orden in ((cls._FECHA_EN_RE, ("mes", "dia", "anio")),
+                              (cls._FECHA_ES_RE, ("dia", "mes", "anio"))):
+            m = patron.search(cabeza)
+            if not m:
+                continue
+            partes = dict(zip(orden, m.groups()))
+            mes = cls._MESES_FECHA.get(partes["mes"][:3].lower())
+            if not mes:
+                continue
+            try:
+                return datetime(int(partes["anio"]), mes, int(partes["dia"])).timestamp()
+            except ValueError:
+                continue
+        return None
+
+    @classmethod
+    def _lo_mas_reciente_primero(cls, pares: list) -> list:
+        fechados = [(cls._fecha_del_resultado(f), i) for i, (f, _u) in enumerate(pares)]
+        con = sorted((p for p in fechados if p[0] is not None), key=lambda p: -p[0])
+        if len(con) < 2:
+            return pares
+        sin = [i for fecha, i in fechados if fecha is None]
+        return [pares[i] for _f, i in con] + [pares[i] for i in sin]
 
     # ── Enriquecer la query con la fecha (sesión 42) ────────────────────
     # DuckDuckGo devuelve páginas viejas si la query no ancla el momento:

@@ -15,7 +15,7 @@ project_name = "Celestia"
 bundle = "io.github.momentomato709"
 # Súbela en cada versión que se publique: Android sólo deja instalar encima
 # una versión igual o mayor que la que ya hay.
-version = "2.3.6"
+version = "2.4.0"
 url = "https://github.com/MomenTomato709"
 license.file = "LICENSE"
 author = "Enzo"
