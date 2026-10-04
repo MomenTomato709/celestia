@@ -1,0 +1,12 @@
+# Lo copia android/preparar.py desde el repositorio antes de cada build.
+src/celestia_lib/
+src/imagenes/
+src/celestia_movil/nucleo.py
+icono/
+LICENSE
+# Lo genera Briefcase.
+build/
+dist/
+logs/
+# Las baja android.yml de la version ruedas-android.
+ruedas/*.whl

@@ -1,0 +1,1 @@
+Aqui deja android.yml las ruedas de Android fabricadas aparte (ruedas_android.yml). No van en git.

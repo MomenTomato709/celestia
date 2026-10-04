@@ -1,0 +1,54 @@
+# Celestia — Dependencias Python
+# Instalación: pip install -r dependencias/requirements.txt --break-system-packages
+#
+# Versiones pineadas a >= la versión testeada en sesión 15 (mayo 2026)
+# para garantizar reproducibilidad sin atar a una micro-versión exacta.
+# Si una versión nueva rompe Celestia, retroceder al pin específico.
+
+# ── Núcleo LLM ────────────────────────────────
+torch>=2.0.0,<3.0
+transformers>=4.40.0,<6.0
+accelerate>=0.27.0
+tokenizers>=0.15.0,<1.0
+sentencepiece>=0.1.99
+
+# ── Memoria vectorial ─────────────────────────
+sentence-transformers>=2.7.0
+faiss-cpu>=1.7.4,<2.0     # faiss-gpu si tienes CUDA
+
+# ── Voz / STT ──────────────────────────────────
+faster-whisper>=1.0.0,<2.0
+edge-tts>=6.1.0           # TTS principal (online)
+
+# ── Web / API ──────────────────────────────────
+flask>=3.0,<4.0
+
+# ── App instalable: avisos push con la app cerrada ──
+pywebpush>=2.5.0
+
+# ── Crypto (vault de contraseñas) ──────────────
+cryptography>=42.0,<45.0
+
+# ── Generación de documentos ───────────────────
+reportlab>=4.0       # PDF
+python-docx>=1.0     # DOCX
+markdown>=3.5        # MD → HTML
+
+# ── Utilidades ────────────────────────────────
+numpy>=1.24.0,<3.0
+scikit-learn>=1.3.0
+huggingface-hub>=0.20.0,<2.0
+requests>=2.31
+
+# ── CPU/móvil: inferencia rápida en ARM (llama-cpp) ──────────
+# Permite usar Qwen2.5-1.5B o 3B a full velocidad en el Nothing Phone 2a
+# Setup automático en Termux si clang y cmake están instalados:
+#   pkg install clang cmake && bash dependencias/setup.sh
+llama-cpp-python>=0.2.90
+
+# ── GPU potente (>= 6GB VRAM): quantización 4-bit ──
+# Solo si tienes CUDA — descomenta:
+# bitsandbytes>=0.43.0
+
+# ── Opcional: atención optimizada en GPU (hasta 3x más rápido) ──
+# flash-attn>=2.5.0   # requiere: pip install flash-attn --no-build-isolation

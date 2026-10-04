@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<!--
+  La página de descarga de Celestia: eliges tu sistema y te llevas su
+  instalador. Celestia la sube a la web pública (GitHub Pages) al arrancar,
+  junto al chat (`web_publica.publicar_descargas`).
+
+  Los enlaces van a «releases/latest/download/…» del repositorio público donde
+  está la web: GitHub los redirige siempre a la última versión publicada, así
+  que la página no hay que tocarla al sacar una versión nueva. Los cuelga ahí el
+  flujo «Instaladores» al etiquetar una versión (.github/workflows).
+
+  Sin nada de fuera (ni fuentes, ni CDN): como el chat.
+-->
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<meta name="theme-color" content="#0B0D17">
+<title>Descargar Celestia</title>
+<meta name="description" content="Celestia, tu IA personal: se instala en un minuto en Windows, Mac, Linux o Android y vive en tu aparato.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2032%2032%27%3E%3Cellipse%20cx%3D%2716%27%20cy%3D%2716%27%20rx%3D%2714.2%27%20ry%3D%275.4%27%20transform%3D%27rotate%28-24%2016%2016%29%27%20fill%3D%27none%27%20stroke%3D%27%238B7CF6%27%20stroke-width%3D%271.7%27%2F%3E%3Cpath%20d%3D%27M16%203.5Q16%2016%2028.5%2016Q16%2016%2016%2028.5Q16%2016%203.5%2016Q16%2016%2016%203.5Z%27%20fill%3D%27%23A78BFA%27%2F%3E%3C%2Fsvg%3E">
+<style>
+:root {
+  --fondo: #0B0D17; --superficie: #12162A; --superficie-alta: #171C33;
+  --borde: #1C2140; --texto: #F5F3FF; --tenue: #8890B5; --apagado: #5A6186;
+  --violeta: #8B7CF6; --iris: #A78BFA; --cian: #4FD1E0; --aurora: #6EE7B7;
+  --sombra: 0 18px 50px -20px rgba(0,0,0,.85);
+  --curva: cubic-bezier(.22,1,.36,1);
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --fondo: #F4F3FA; --superficie: #FFFFFF; --superficie-alta: #FFFFFF;
+    --borde: #E2E0EF; --texto: #191A2B; --tenue: #5C5F7A; --apagado: #8B8DA5;
+    --violeta: #6D4FE0; --iris: #7C5CF0; --cian: #0E93A8; --aurora: #0E9A6B;
+    --sombra: 0 14px 40px -22px rgba(40,30,90,.35);
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--fondo); color: var(--texto);
+  font: 15px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+body { min-height: 100vh; }
+main { max-width: 920px; margin: 0 auto; padding: 48px 16px 64px; }
+a { color: var(--iris); }
+
+.cabeza { text-align: center; margin-bottom: 34px; }
+.cabeza svg { width: 92px; height: 92px; display: block; margin: 0 auto 14px;
+  filter: drop-shadow(0 0 22px color-mix(in srgb, var(--violeta) 55%, transparent)); }
+.nombre { font-size: 15px; font-weight: 600; letter-spacing: .34em; text-transform: uppercase;
+  background: linear-gradient(100deg, var(--iris), var(--cian));
+  -webkit-background-clip: text; background-clip: text; color: transparent; }
+h1 { font-size: clamp(26px, 4.4vw, 38px); line-height: 1.2; margin: 10px 0 10px; }
+.lema { color: var(--tenue); max-width: 560px; margin: 0 auto; }
+
+/* La recomendada: el sistema desde el que se abre la página. */
+.elegida {
+  border: 1px solid color-mix(in srgb, var(--iris) 40%, var(--borde));
+  border-radius: 22px; background: var(--superficie); box-shadow: var(--sombra);
+  padding: 26px; margin-bottom: 30px;
+  display: grid; grid-template-columns: 1fr auto; gap: 18px 28px; align-items: center;
+}
+.elegida .para { font-size: 13px; color: var(--tenue); text-transform: uppercase; letter-spacing: .12em; }
+.elegida h2 { margin: 2px 0 6px; font-size: 22px; }
+.elegida .que { color: var(--tenue); margin: 0; font-size: 14px; }
+.boton {
+  display: inline-flex; align-items: center; gap: 10px; justify-content: center;
+  padding: 13px 22px; border-radius: 14px; border: 0; cursor: pointer;
+  font: inherit; font-weight: 600; text-decoration: none; color: #fff;
+  background: linear-gradient(135deg, var(--violeta), var(--cian));
+  transition: transform .16s var(--curva), filter .16s ease;
+}
+.boton:hover { filter: brightness(1.08); transform: translateY(-1px); }
+.boton:active { transform: scale(.97); }
+.boton svg { width: 18px; height: 18px; }
+.boton[aria-disabled="true"] { background: var(--superficie-alta); color: var(--apagado);
+  border: 1px solid var(--borde); cursor: default; transform: none; filter: none; }
+.pasos { grid-column: 1 / -1; margin: 4px 0 0; padding: 16px 0 0 20px;
+  border-top: 1px solid var(--borde); color: var(--tenue); font-size: 14px; }
+.pasos li { margin: 3px 0; }
+.pasos li::marker { color: var(--iris); font-weight: 600; }
+.aviso { grid-column: 1 / -1; margin: 0; font-size: 13px; color: var(--apagado); }
+
+h3 { font-size: 14px; color: var(--tenue); font-weight: 600; margin: 0 2px 12px; }
+.sistemas { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+.sistema {
+  display: flex; align-items: center; gap: 12px; text-align: left;
+  padding: 14px; border-radius: 16px; border: 1px solid var(--borde);
+  background: var(--superficie); color: inherit; font: inherit; cursor: pointer;
+  transition: border-color .16s ease, background .16s ease, transform .16s var(--curva);
+}
+.sistema:hover { border-color: color-mix(in srgb, var(--violeta) 55%, var(--borde)); transform: translateY(-1px); }
+.sistema[aria-pressed="true"] { border-color: var(--violeta);
+  background: color-mix(in srgb, var(--violeta) 12%, var(--superficie)); }
+.sistema:focus-visible { outline: 2px solid var(--violeta); outline-offset: 2px; }
+.sistema .ic { width: 38px; height: 38px; flex: 0 0 auto; border-radius: 11px; display: grid; place-items: center;
+  color: var(--iris); background: color-mix(in srgb, var(--violeta) 14%, transparent); }
+.sistema .ic svg { width: 20px; height: 20px; }
+.sistema b { display: block; font-weight: 600; color: var(--texto); }
+.sistema span { font-size: 12.5px; color: var(--tenue); }
+
+.lleva { margin-top: 38px; display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.lleva div { border: 1px solid var(--borde); border-radius: 16px; padding: 16px; background: var(--superficie); }
+.lleva b { display: block; margin-bottom: 2px; }
+.lleva p { margin: 0; color: var(--tenue); font-size: 13.5px; }
+footer { margin-top: 40px; text-align: center; color: var(--apagado); font-size: 12.5px; }
+
+@media (max-width: 640px) {
+  main { padding-top: 32px; }
+  .elegida { grid-template-columns: 1fr; padding: 20px; }
+  .elegida .boton { width: 100%; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<main>
+  <header class="cabeza">
+    <svg viewBox="0 0 100 100" aria-hidden="true">
+      <defs>
+        <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#C4B5FD"/><stop offset=".55" stop-color="#8B7CF6"/><stop offset="1" stop-color="#4FD1E0"/>
+        </linearGradient>
+      </defs>
+      <ellipse cx="50" cy="50" rx="44" ry="17" transform="rotate(-24 50 50)" fill="none" stroke="url(#g)" stroke-width="2.6"/>
+      <ellipse cx="50" cy="50" rx="17" ry="44" transform="rotate(-24 50 50)" fill="none" stroke="url(#g)" stroke-width="2" opacity=".55"/>
+      <path d="M50 12Q50 50 88 50Q50 50 50 88Q50 50 12 50Q50 50 50 12Z" fill="url(#g)"/>
+      <circle cx="86" cy="36" r="4" fill="#F472B6"/>
+    </svg>
+    <div class="nombre">Celestia</div>
+    <h1>Tu IA personal, en tu aparato.</h1>
+    <p class="lema">Charla, crea proyectos y documentos, recuerda lo que le cuentas y aprende cosas nuevas.
+      Se instala en un minuto y lo tuyo no sale de tu aparato.</p>
+  </header>
+
+  <section class="elegida" id="elegida" aria-live="polite">
+    <div>
+      <div class="para" id="el-para">Para tu ordenador</div>
+      <h2 id="el-nombre">Windows</h2>
+      <p class="que" id="el-que"></p>
+    </div>
+    <a class="boton" id="el-boton" href="#" rel="noopener">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>
+      <span id="el-txt">Descargar</span>
+    </a>
+    <ol class="pasos" id="el-pasos"></ol>
+    <p class="aviso" id="el-aviso"></p>
+  </section>
+
+  <h3>Elige tu sistema</h3>
+  <div class="sistemas" id="sistemas" role="group" aria-label="Sistemas"></div>
+
+  <section class="lleva" aria-label="Qué trae">
+    <div><b>Su propia app</b><p>Se abre en su ventana, con el chat y pestañas para tus proyectos, tus archivos y lo que sabe de ti.</p></div>
+    <div><b>Sin pasos raros</b><p>Lleva todo dentro: no hace falta instalar Python ni escribir comandos. Y se actualiza sola: te avisa y se instala desde la propia app.</p></div>
+    <div><b>Para pensar, una clave gratis</b><p>La primera vez te pide una clave de Gemini o de Groq (gratis, un minuto). Se pega en el chat y listo.</p></div>
+    <div><b>Lo tuyo, en tu aparato</b><p>Tus conversaciones, tu memoria y tus claves se quedan en tu aparato. Actualizar no las toca.</p></div>
+  </section>
+
+  <footer>Celestia · hecha por Enzo · <span id="version"></span></footer>
+</main>
+
+<script>
+"use strict";
+/* Dónde están los instaladores: el repositorio de esta misma web. En GitHub
+   Pages la dirección es usuario.github.io/repo/, así que sale de ahí; abierta
+   desde otro sitio, el de Enzo. */
+const REPO = (() => {
+  const h = location.hostname.match(/^([^.]+)\.github\.io$/i);
+  const repo = location.pathname.split("/").filter(Boolean)[0];
+  return h && repo ? `${h[1]}/${repo}` : "MomenTomato709/celestia";
+})();
+const BAJAR = nombre => `https://github.com/${REPO}/releases/latest/download/${nombre}`;
+
+const IC = {
+  windows: '<path d="M3 5.5l7.5-1v7H3zM12 4.3L21 3v8.5h-9zM3 12.5h7.5v7L3 18.5zM12 12.5h9V21l-9-1.3z" fill="currentColor" stroke="none"/>',
+  mac: '<path d="M16.5 12.6c0-2.3 1.9-3.4 2-3.5-1.1-1.6-2.8-1.8-3.4-1.8-1.4-.2-2.8.8-3.5.8s-1.8-.8-3-.8C6.9 7.3 5 8.6 5 11.6c0 1.9.7 3.9 1.6 5.2.8 1.1 1.5 2.1 2.6 2.1 1 0 1.4-.7 2.7-.7s1.6.7 2.7.7 1.8-1 2.5-2c.8-1.1 1.1-2.2 1.1-2.3-.1 0-1.7-.7-1.7-2zM14.3 5.8c.6-.7 1-1.7.9-2.6-.8 0-1.8.5-2.4 1.2-.5.6-1 1.6-.9 2.5.9.1 1.8-.4 2.4-1.1z" fill="currentColor" stroke="none"/>',
+  linux: '<path d="M12 3c-2 0-3 1.7-3 4 0 1.4.4 2.3-.6 3.6C7 12.4 6 14.3 6 16.2c0 .8.3 1.6.8 2.1M12 3c2 0 3 1.7 3 4 0 1.4-.4 2.3.6 3.6 1.4 1.8 2.4 3.7 2.4 5.6 0 .8-.3 1.6-.8 2.1M8 19.5c1.2.9 2.6 1.3 4 1.3s2.8-.4 4-1.3M10.5 7.5h.01M13.5 7.5h.01"/>',
+  android: '<path d="M6 10h12v7a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2zM6 10a6 6 0 0 1 12 0M8 4.5l1.3 2M16 4.5l-1.3 2M10 7.6h.01M14 7.6h.01M3.5 11v5M20.5 11v5"/>',
+  iphone: '<rect x="7" y="2.5" width="10" height="19" rx="2.4"/><path d="M11 18.5h2"/>',
+};
+
+/* Cada sistema: su archivo y cómo se instala, dicho para quien nunca ha
+   instalado nada fuera de una tienda de apps. */
+const SISTEMAS = {
+  "windows": {
+    nombre: "Windows", sub: "Windows 10 y 11", ic: "windows", para: "Para tu ordenador",
+    archivo: "Celestia-Instalador-Windows.exe", peso: "unos 80 MB",
+    pasos: ["Abre el archivo que se descarga.",
+            "Si Windows avisa («Windows protegió su PC»), pulsa «Más información» y «Ejecutar de todas formas».",
+            "Siguiente → Instalar → «Abrir Celestia ahora». Deja un acceso directo en el escritorio."],
+    aviso: "No pide permisos de administrador. Se instala solo para tu usuario.",
+  },
+  "mac-arm64": {
+    nombre: "Mac con Apple M", sub: "M1, M2, M3, M4…", ic: "mac", para: "Para tu Mac",
+    archivo: "Celestia-Mac-arm64.zip", peso: "unos 130 MB",
+    pasos: ["Abre el .zip que se descarga y arrastra Celestia a Aplicaciones.",
+            "La primera vez, macOS dirá que no puede comprobar quién la hizo: ve a Ajustes del Sistema → Privacidad y seguridad → «Abrir igualmente».",
+            "Desde entonces se abre como cualquier app."],
+    aviso: "¿No sabes qué Mac tienes? Menú de la manzana → Acerca de este Mac: si pone «Chip» y no «Procesador Intel», es este.",
+  },
+  "mac-x64": {
+    nombre: "Mac con Intel", sub: "Macs de antes de 2020", ic: "mac", para: "Para tu Mac",
+    archivo: "Celestia-Mac-x64.zip", peso: "unos 135 MB",
+    pasos: ["Abre el .zip que se descarga y arrastra Celestia a Aplicaciones.",
+            "La primera vez, macOS dirá que no puede comprobar quién la hizo: ve a Ajustes del Sistema → Privacidad y seguridad → «Abrir igualmente».",
+            "Desde entonces se abre como cualquier app."],
+    aviso: "Necesita macOS 11 (Big Sur) o posterior.",
+  },
+  "linux-x64": {
+    nombre: "Linux", sub: "PC normal (x64)", ic: "linux", para: "Para tu ordenador",
+    archivo: "Celestia-Linux-x64.tar.gz", peso: "unos 135 MB",
+    pasos: ["Descomprime el archivo donde quieras.",
+            "Abre «Celestia.sh» (doble clic o ./Celestia.sh).",
+            "Opcional: «instalar-acceso-directo.sh» la pone en el menú de aplicaciones."],
+    aviso: "Se abre en su propia ventana si tienes Chrome, Chromium, Edge o Brave; si no, en tu navegador.",
+  },
+  "linux-arm64": {
+    nombre: "Linux ARM", sub: "Raspberry Pi y similares", ic: "linux", para: "Para tu ordenador",
+    archivo: "Celestia-Linux-arm64.tar.gz", peso: "unos 130 MB",
+    pasos: ["Descomprime el archivo donde quieras.",
+            "Abre «Celestia.sh» (doble clic o ./Celestia.sh).",
+            "Opcional: «instalar-acceso-directo.sh» la pone en el menú de aplicaciones."],
+    aviso: "Se abre en su propia ventana si tienes Chrome, Chromium, Edge o Brave; si no, en tu navegador.",
+  },
+  "android": {
+    nombre: "Android", sub: "Android 8 o posterior", ic: "android", para: "Para tu móvil",
+    archivo: "Celestia-Android.apk", peso: "unos 80 MB",
+    pasos: ["Abre el archivo que se descarga.",
+            "Si el móvil lo pide, permite «instalar apps de origen desconocido» para tu navegador.",
+            "Instalar → Abrir."],
+    aviso: "Versión de prueba: todavía no maneja el móvil por ti.",
+  },
+  "ios": {
+    nombre: "iPhone y iPad", sub: "Todavía no", ic: "iphone", para: "Para tu iPhone",
+    archivo: null,
+    pasos: ["Apple no deja instalar apps fuera de su tienda, y Celestia aún no está en ella.",
+            "Mientras tanto, instálala en tu ordenador: desde el iPhone puedes hablarle por la web."],
+    aviso: "",
+  },
+};
+const ORDEN = ["windows", "mac-arm64", "mac-x64", "linux-x64", "linux-arm64", "android", "ios"];
+
+/* Qué sistema tiene quien la abre. El de Mac necesita una vuelta más: Safari
+   y Firefox dicen «Intel» también en los Mac con chip de Apple. */
+async function detectar() {
+  const ua = navigator.userAgent || "";
+  const plat = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || "";
+  if (/android/i.test(ua)) return "android";
+  if (/iphone|ipad|ipod/i.test(ua) || (/mac/i.test(plat) && navigator.maxTouchPoints > 1)) return "ios";
+  if (/win/i.test(plat) || /windows/i.test(ua)) return "windows";
+  if (/mac/i.test(plat) || /mac os/i.test(ua)) return (await esIntel()) ? "mac-x64" : "mac-arm64";
+  if (/linux|x11|cros/i.test(plat + ua)) return /aarch64|arm/i.test(plat + ua) ? "linux-arm64" : "linux-x64";
+  return "windows";
+}
+async function esIntel() {
+  try {
+    if (navigator.userAgentData && navigator.userAgentData.getHighEntropyValues) {
+      const v = await navigator.userAgentData.getHighEntropyValues(["architecture"]);
+      if (v.architecture) return v.architecture === "x86";
+    }
+  } catch {}
+  try {
+    const gl = document.createElement("canvas").getContext("webgl");
+    const ext = gl && gl.getExtension("WEBGL_debug_renderer_info");
+    const r = ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : "";
+    if (/apple m\d|apple gpu/i.test(r)) return false;
+    if (/intel|amd|radeon/i.test(r)) return true;
+  } catch {}
+  return false;            // desde 2020 casi todos los Mac son de chip Apple
+}
+
+function elegir(clave) {
+  const s = SISTEMAS[clave];
+  document.getElementById("el-para").textContent = s.para;
+  document.getElementById("el-nombre").textContent = s.nombre;
+  document.getElementById("el-que").textContent = s.archivo ? `${s.archivo} · ${s.peso}` : s.sub;
+  const boton = document.getElementById("el-boton");
+  if (s.archivo) {
+    boton.href = BAJAR(s.archivo);
+    boton.removeAttribute("aria-disabled");
+    boton.removeAttribute("tabindex");
+    document.getElementById("el-txt").textContent = `Descargar para ${s.nombre}`;
+  } else {
+    boton.removeAttribute("href");
+    boton.setAttribute("aria-disabled", "true");
+    boton.setAttribute("tabindex", "-1");
+    document.getElementById("el-txt").textContent = "Todavía no disponible";
+  }
+  const pasos = document.getElementById("el-pasos");
+  pasos.replaceChildren(...s.pasos.map(p => Object.assign(document.createElement("li"), {textContent: p})));
+  document.getElementById("el-aviso").textContent = s.aviso;
+  for (const b of document.querySelectorAll(".sistema"))
+    b.setAttribute("aria-pressed", String(b.dataset.clave === clave));
+}
+
+function pintarSistemas() {
+  const caja = document.getElementById("sistemas");
+  for (const clave of ORDEN) {
+    const s = SISTEMAS[clave];
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "sistema"; b.dataset.clave = clave;
+    b.setAttribute("aria-pressed", "false");
+    b.innerHTML = `<span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[s.ic]}</svg></span>
+      <span><b></b><span></span></span>`;
+    b.querySelector("b").textContent = s.nombre;
+    b.querySelector("b + span").textContent = s.sub;
+    b.onclick = () => { elegir(clave); document.getElementById("elegida").scrollIntoView({behavior: "smooth", block: "nearest"}); };
+    caja.appendChild(b);
+  }
+}
+
+/* La versión publicada, si GitHub la dice (sin llave: 60 consultas por hora,
+   de sobra para una página). Si no contesta, la página funciona igual. */
+async function version() {
+  try {
+    const r = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`);
+    if (!r.ok) return;
+    const v = await r.json();
+    if (v.tag_name) document.getElementById("version").textContent = `versión ${v.tag_name}`;
+  } catch {}
+}
+
+pintarSistemas();
+elegir("windows");
+detectar().then(elegir);
+version();
+</script>
+</body>
+</html>

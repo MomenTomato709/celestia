@@ -1,0 +1,68 @@
+# Fabrica para la app de Android lo que PyPI sólo tiene compilado para PC.
+#
+# Hoy: primp, el motor del metabuscador (ddgs). Enzo, 4 oct 2026: «para el
+# buscador de la app de Android nada de DuckDuckGo: fabricar primp para
+# Android para que funcione el mismo metabuscador que en el PC».
+#
+# Las ruedas se cuelgan de una versión aparte, «ruedas-android» (marcada como
+# previa, para que la app no la confunda con una versión de Celestia), y
+# android.yml las baja de ahí. Sólo hay que repetirlo al cambiar de versión.
+
+name: Ruedas para Android
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [codigo]
+    paths:
+      - ".github/workflows/ruedas_android.yml"
+      - "android/fabricar_ruedas.sh"
+      - "android/montar_rueda.py"
+
+permissions:
+  contents: write
+
+env:
+  PRIMP: "2.0.1"
+
+jobs:
+  primp:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {rust: aarch64-linux-android, abi: arm64-v8a}
+          - {rust: x86_64-linux-android, abi: x86_64}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Fabricar primp para ${{ matrix.abi }}
+        run: bash android/fabricar_ruedas.sh "$PRIMP" ${{ matrix.rust }} ${{ matrix.abi }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rueda-${{ matrix.abi }}
+          path: ruedas/*.whl
+          if-no-files-found: error
+
+  publicar:
+    needs: primp
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: ruedas
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ruedas-android
+          name: Ruedas para la app de Android
+          prerelease: true
+          body: >-
+            Librerías compiladas para Android (Chaquopy, Python 3.12) que en PyPI
+            sólo existen para PC. No es una versión de Celestia: las usa
+            android.yml al fabricar la APK.
+          files: ruedas/*.whl

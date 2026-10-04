@@ -1,0 +1,103 @@
+# Fabrica los instaladores de Celestia para Windows, Mac y Linux.
+#
+# Se lanza a mano (pestaña Actions → «Instaladores» → Run workflow) o al
+# etiquetar una versión (git tag v2.1 && git push --tags). Todo sale de una
+# sola máquina Ubuntu: instalador/construir.py baja el Python y las librerías
+# ya compiladas de cada sistema, así que no hace falta un Windows ni un Mac.
+#
+# Nunca lleva claves ni conversaciones: `git archive` deja fuera lo del
+# .gitignore y construir.py lo vuelve a comprobar antes de empaquetar.
+
+name: Instaladores
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+    # En el repositorio público, cada subida de código se fabrica y se prueba
+    # en Windows, Mac y Linux (sin publicar nada: eso sólo con una etiqueta).
+    branches: [codigo]
+
+permissions:
+  contents: write   # sólo para colgar los instaladores en la versión etiquetada
+
+jobs:
+  fabricar:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        destino: [windows-x64, macos-arm64, macos-x64, linux-x64, linux-arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Herramientas
+        run: |
+          sudo apt-get update -q && sudo apt-get install -y -q nsis
+          python -m pip install --quiet pillow
+      - name: Fabricar
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python instalador/construir.py ${{ matrix.destino }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: celestia-${{ matrix.destino }}
+          path: dist/Celestia-*
+          if-no-files-found: error
+
+  # Cada instalador se instala y se abre en su sistema de verdad (las
+  # máquinas de GitHub): instalación silenciosa, arranque, /estado, el chat y
+  # la clave. Lo que en el móvil no se puede probar.
+  probar:
+    needs: fabricar
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: windows-latest, destino: windows-x64}
+          - {os: macos-latest, destino: macos-arm64}
+          - {os: macos-15-intel, destino: macos-x64}
+          - {os: ubuntu-latest, destino: linux-x64}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: celestia-${{ matrix.destino }}
+          path: paquete
+      - name: Instalar, abrir y hablarle
+        shell: bash
+        run: bash instalador/probar_paquete.sh ${{ matrix.destino }} paquete
+
+  publicar:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [fabricar, probar]
+    runs-on: ubuntu-latest
+    env:
+      # Un token con permiso de escritura en el repositorio PÚBLICO de la web
+      # (MomenTomato709/celestia). Sin él, sólo se publica aquí, en el privado,
+      # y la página de descarga (que enlaza al público) no encuentra nada.
+      PUBLICAR_TOKEN: ${{ secrets.CELESTIA_PUBLICAR_TOKEN }}
+    steps:
+      # Sólo para las notas de la versión (lo que la app enseña al actualizar).
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/Celestia-*
+          body_path: instalador/NOTAS.md
+      # La página de descarga (celestia_lib/web/descargar.html) enlaza a
+      # «releases/latest/download/…» del repositorio público.
+      - name: Publicar también en el repositorio de la web
+        if: env.PUBLICAR_TOKEN != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          repository: MomenTomato709/celestia
+          token: ${{ env.PUBLICAR_TOKEN }}
+          files: dist/Celestia-*

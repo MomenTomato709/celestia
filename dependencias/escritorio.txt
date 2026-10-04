@@ -1,0 +1,41 @@
+# Celestia de escritorio (Windows, Mac, Linux) — lo que lleva el instalador.
+#
+# Sin torch, transformers ni modelos locales: en un PC normal piensa con los
+# proveedores de la nube (Gemini, Groq…), y esas librerías son 2 GB que casi
+# nadie aprovecharía. Probado con una instalación limpia el 3 oct 2026: con lo
+# de aquí arranca en ~5 s y conversa, hace documentos y lee archivos.
+#
+# Sin topes de versión que no hagan falta: el instalador se fabrica con las
+# ruedas (wheels) de cada sistema y conviene la última que exista.
+
+# ── Núcleo: API, chat web y bóveda ──
+flask>=3.0,<4.0
+requests>=2.31
+numpy>=1.24
+cryptography>=42
+argon2-cffi>=23.1
+
+# ── Documentos: crear PDF / Word, leer los que le mandas ──
+reportlab>=4.0
+python-docx>=1.0
+markdown>=3.5
+pypdf>=4.0
+pdfplumber>=0.11
+pillow>=10.0
+lxml>=5.0
+scipy>=1.11        # el calco de fotos (lineas.py): tatuajes, dibujos
+
+# ── Voz (en línea) y avisos de la app ──
+edge-tts>=6.1
+pywebpush>=2.0
+
+# ── Buscar: varios buscadores a la vez, como el SearXNG del móvil ──
+# (el HTML de DuckDuckGo a solas da captcha a la tercera búsqueda seguida).
+# Oír sin claves (faster-whisper) NO va aquí: se instala solo la primera vez
+# que hace falta (celestia_lib/oido.py), son ~300 MB que no todos usan.
+ddgs>=9.0
+
+# ── El aparato: memoria libre, zona horaria (Windows no trae la base de zonas) ──
+psutil>=5.9
+tzdata
+tzlocal>=5.0

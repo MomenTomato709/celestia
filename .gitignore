@@ -1,0 +1,127 @@
+# ─── Secretos ──────────────────────────────────────────────────────────
+# Secretos: el nombre exacto NO basta. Las copias de seguridad son justo lo que
+# se genera al limpiar o migrar, y `.env.bak.20260827` llevaba dentro las mismas
+# nueve claves vivas que el `.env` (Groq, OpenRouter, Gemini, Cerebras, GitHub,
+# SambaNova, Mistral, Pushbullet y el token del bot de Discord).
+.env
+.env.*
+!.env.example
+.env.local
+.env.*.local
+*.key
+*.pem
+cambiar_keys.sh
+
+# ─── Sesión y credenciales de WhatsApp ─────────────────────────────────
+whatsapp_bridge/auth/
+whatsapp_bridge/numero.txt
+
+# ─── Datos personales del usuario (NUNCA committear) ───────────────────
+# La memoria personal, incluidas las copias que deja una limpieza: el código
+# viaja, las conversaciones no.
+memoria/*.db
+memoria/*.db-journal
+memoria/*.db-wal
+memoria/*.sqlite*
+recibidos/
+memoria/celestia.db
+memoria/celestia.db-journal
+memoria/celestia.db-wal
+memoria/celestia.db-shm
+memoria/perfil_usuario.json
+memoria/dispositivos.json
+memoria/training_data.jsonl
+memoria/faiss.index
+memoria/faiss_meta.json
+memoria/snapshots/
+memoria/model_cache/
+memoria/vault.enc
+memoria/vault.meta
+memoria/patrones_ui.json
+
+# ─── Logs (suelen contener mensajes del usuario) ───────────────────────
+logs/
+*.log
+
+# ─── Outputs generados por Celestia ────────────────────────────────────
+documentos/
+imagenes/*
+# …menos el logo: es parte del programa (iconos de la app, el instalador).
+!imagenes/celestia_logo.png
+!imagenes/celestia_logo_transparente.png
+proyectos/
+imagen_generada.png
+prueba_*.txt
+ejemplo.txt
+
+# ─── Python ────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+venv/
+.venv/
+env/
+
+# ─── Node ──────────────────────────────────────────────────────────────
+whatsapp_bridge/node_modules/
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ─── Sistemas operativos ───────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+System Volume Information/
+*.swp
+*.swo
+
+# ─── Editores ──────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# ─── Versiones viejas / experimentales ─────────────────────────────────
+archivo/
+*.bak
+*.old
+*viejo*
+
+# ─── Estado local (al activar git para revisar con Codex, 21 sep 2026) ─
+# La carpeta memoria/ entera es estado de ESTA instancia: bases de datos,
+# copias, caché de modelos (1,2 GB), lo aprendido del juego… Nada es código.
+memoria/
+conversacion_completa.txt
+*.pid
+.claude/settings.local.json
+.claude/*.lock
+
+# ─── Binarios y modelos pesados ────────────────────────────────────────
+voces_piper/*.onnx
+bin/
+*.tar.gz
+*.gguf
+*.npz
+
+# ─── Examen: los informes de cada examen (la marca sí va en git) ─────
+examen/resultados/
+.aider*
+*.pyc
+
+# Ficheros de trabajo con el móvil (puente de Shizuku, capturas, reflejo del ZZZ).
+.movil/
+
+# Dentro de Celestia, pero tuyos y no del código: los instaladores fabricados y tus papeles.
+instaladores/
+papeles/

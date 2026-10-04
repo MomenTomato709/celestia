@@ -1,0 +1,100 @@
+# La app de Android de Celestia (BeeWare Briefcase + Chaquopy).
+#
+# Lleva Python y Celestia dentro de la APK: el servidor corre en la propia app y
+# el chat se ve en una vista web, todo en el móvil. Sin Termux ni Linux dentro.
+#
+# Se fabrica en GitHub (`.github/workflows/android.yml`): las herramientas de
+# Google para empaquetar APK no existen para ARM, así que en el móvil no se puede.
+# Antes de `briefcase`, `android/preparar.py` copia aquí el código de Celestia.
+#
+# Lo que todavía NO hace (v1): manejar el móvil (Shizuku), jugar al ZZZ, ni
+# seguir viva con la app cerrada — Android la congela al salir.
+
+[tool.briefcase]
+project_name = "Celestia"
+bundle = "io.github.momentomato709"
+# Súbela en cada versión que se publique: Android sólo deja instalar encima
+# una versión igual o mayor que la que ya hay.
+version = "2.3.6"
+url = "https://github.com/MomenTomato709"
+license.file = "LICENSE"
+author = "Enzo"
+author_email = "139169127+MomenTomato709@users.noreply.github.com"
+
+[tool.briefcase.app.celestia_movil]
+formal_name = "Celestia"
+description = "Tu IA personal"
+long_description = "Celestia: tu IA personal, con su memoria en tu móvil."
+icon = "icono/celestia"
+sources = [
+    "src/celestia_movil",
+    "src/celestia_lib",
+    "src/imagenes",
+]
+requires = [
+    "flask>=3.0,<4.0",
+    "requests>=2.31",
+    "numpy",
+    "cryptography",
+    "argon2-cffi",
+    "reportlab>=4.0",
+    "python-docx>=1.0",
+    "markdown>=3.5",
+    "pypdf>=4.0",
+    "pillow",
+    "tzdata",
+    # La voz (4 oct 2026: la app no hablaba). aiohttp fijado en la última que
+    # Chaquopy tiene compilada para Android con Python 3.12; la de PyPI sólo
+    # existe como código fuente con partes en C y no se podría instalar.
+    "edge-tts>=7.0",
+    "aiohttp==3.10.10",
+    # El metabuscador, como en el PC (Enzo: «nada de DuckDuckGo» en la app).
+    # primp no existe para Android en PyPI: lo fabrica ruedas_android.yml
+    # (android/fabricar_ruedas.sh) y android.yml lo deja en ./ruedas. Las dos
+    # versiones fijas: con una más nueva, pip intentaría compilar el código
+    # fuente (Rust) y la APK no se fabricaría. lxml: la que tiene Chaquopy.
+    "ddgs>=9.0",
+    "primp==2.0.1",
+    "lxml==5.3.0",
+]
+# Donde pip encuentra las ruedas fabricadas aparte (primp para Android).
+requirement_installer_args = ["--find-links", "./ruedas"]
+
+[tool.briefcase.app.celestia_movil.android]
+requires = [
+    "toga-android~=0.5",
+]
+min_os_version = "26"
+# Los colores de Celestia en las barras del sistema y al abrir. Sin esto salía
+# el verde de la plantilla de Android arriba («se ve algo verde arriba
+# siempre», Enzo, 3 oct 2026). La app además los pone al arrancar (app.py).
+primary_color = "#0B0D17"
+primary_color_dark = "#0B0D17"
+accent_color = "#8B7CF6"
+splash_background_color = "#0B0D17"
+# Sin la barra de título de Android: el chat ya trae su cabecera con el orbe.
+base_theme = "Theme.MaterialComponents.DayNight.NoActionBar"
+build_gradle_dependencies = [
+    "com.google.android.material:material:1.12.0",
+    "androidx.swiperefreshlayout:swiperefreshlayout:1.1.0",
+    # La pide toga para su cliente web propio (abajo, staticProxy).
+    "androidx.webkit:webkit:1.15.0",
+]
+# Clases de Java escritas en Python que Chaquopy genera al fabricar:
+# - la de toga, para poder decidir qué enlace se abre dentro y cuál fuera;
+# - la nuestra (celestia_movil/cromo.py): micrófono y «+» en el chat.
+build_gradle_extra_content = """
+chaquopy.defaultConfig.staticProxy("toga_android.widgets.internal.webview", "celestia_movil.cromo")
+"""
+# El chat se sirve en http://127.0.0.1 dentro del propio móvil: sin esto,
+# Android (9+) no deja a la vista web cargar http en claro.
+android_manifest_application_attrs_extra_content = 'android:usesCleartextTraffic="true"'
+
+[tool.briefcase.app.celestia_movil.android.permission]
+"android.permission.INTERNET" = {}
+"android.permission.POST_NOTIFICATIONS" = {}
+# Abrir el instalador de Android con la versión nueva (celestia_lib/actualizar.py).
+"android.permission.REQUEST_INSTALL_PACKAGES" = {}
+# Las notas de voz del chat (la vista web pide el micrófono; cromo.py).
+"android.permission.RECORD_AUDIO" = {}
+"android.permission.MODIFY_AUDIO_SETTINGS" = {}

@@ -1,0 +1,177 @@
+# Fabrica la APK de Celestia (BeeWare Briefcase + Chaquopy).
+#
+# En el móvil no se puede: las herramientas de Google que empaquetan una APK
+# (aapt2…) sólo existen para PC x86. Aquí sale una APK de prueba (firmada con
+# la clave de depuración) que se instala a mano en cualquier Android 8+.
+
+name: Android
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+    # En el repositorio público, cada subida de código se fabrica y se prueba
+    # en el emulador (sin publicar nada: eso sólo con una etiqueta).
+    branches: [codigo]
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Herramientas
+        run: python -m pip install --quiet briefcase pillow
+      # primp (el motor del metabuscador) no existe para Android en PyPI: lo
+      # fabrica ruedas_android.yml y lo cuelga de la versión «ruedas-android».
+      - name: Ruedas fabricadas aparte
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p android/ruedas
+          gh release download ruedas-android --repo "$GITHUB_REPOSITORY" \
+            --pattern '*.whl' --dir android/ruedas --clobber
+          ls -la android/ruedas
+      - name: Preparar el código
+        run: python android/preparar.py
+      - name: Crear y fabricar
+        working-directory: android
+        run: |
+          briefcase create android --no-input
+          briefcase build android --no-input
+      - name: Recoger la APK
+        run: |
+          mkdir -p dist
+          cp "$(find android/build -name '*.apk' | head -1)" dist/Celestia-Android.apk
+          ls -la dist
+      # La llave fija de Enzo (3 oct 2026). Sin ella cada fabricación salía
+      # firmada con una llave de depuración NUEVA, y Android no deja instalar
+      # una versión encima de otra firmada distinto: «App no instalada».
+      # Secretos: CELESTIA_APK_LLAVE (el .p12 en base64) y CELESTIA_APK_CLAVE.
+      - name: Firmar con la llave fija
+        env:
+          APK_LLAVE: ${{ secrets.CELESTIA_APK_LLAVE }}
+          APK_CLAVE: ${{ secrets.CELESTIA_APK_CLAVE }}
+        run: |
+          if [ -z "$APK_LLAVE" ]; then
+            echo "::warning::Sin CELESTIA_APK_LLAVE: la APK va con llave de depuración y no se instalará encima de otra versión"
+            exit 0
+          fi
+          # Briefcase usa el SDK que ya trae la máquina de GitHub ($ANDROID_HOME)
+          # si existe; si no, el suyo en ~/.cache/briefcase.
+          FIRMADOR="$(find "${ANDROID_HOME:-/nonexistent}" "${ANDROID_SDK_ROOT:-/nonexistent}" \
+            "$HOME/.cache/briefcase" -path '*build-tools*' -name apksigner -type f 2>/dev/null \
+            | sort -V | tail -1)"
+          echo "apksigner: $FIRMADOR"
+          [ -n "$FIRMADOR" ] || { echo "no encuentro apksigner"; exit 1; }
+          umask 077
+          # Pegado desde el Bloc de notas trae saltos de línea de Windows (\r) y a
+          # veces espacios: base64 -d los rechaza («invalid input», v2.2.4).
+          LIMPIA="$(printf '%s' "$APK_LLAVE" | tr -d ' \r\n\t')"
+          CLAVE_LIMPIA="$(printf '%s' "$APK_CLAVE" | tr -d ' \r\n\t')"
+          # Cruzados (3 oct 2026: la contraseña en LLAVE y la llave en CLAVE):
+          # la contraseña también es base64 válido y salía «basura» de 24 bytes.
+          # El largo es siempre la llave.
+          if [ "${#LIMPIA}" -lt "${#CLAVE_LIMPIA}" ]; then
+            echo "Los dos secretos están cruzados: se usan al revés"
+            T="$LIMPIA"; LIMPIA="$CLAVE_LIMPIA"; CLAVE_LIMPIA="$T"
+          fi
+          if ! printf '%s' "$LIMPIA" | base64 -d > "$RUNNER_TEMP/llave.p12" 2>/dev/null; then
+            echo "La llave no es el texto del «SECRETO 1»: mide ${#LIMPIA} caracteres (debería medir 5660)"
+            exit 1
+          fi
+          export APK_CLAVE="$CLAVE_LIMPIA"
+          "$FIRMADOR" sign --ks "$RUNNER_TEMP/llave.p12" --ks-type PKCS12 \
+            --ks-pass env:APK_CLAVE --ks-key-alias celestia \
+            --out dist/firmada.apk dist/Celestia-Android.apk
+          rm -f "$RUNNER_TEMP/llave.p12"
+          mv dist/firmada.apk dist/Celestia-Android.apk
+          "$FIRMADOR" verify --print-certs dist/Celestia-Android.apk | tee firma.txt
+          ! grep -q "Android Debug" firma.txt || { echo "sigue con la llave de depuración"; exit 1; }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: celestia-android
+          path: dist/Celestia-Android.apk
+          if-no-files-found: error
+
+  # La APK instalada en un emulador de Android: que abra, que Celestia arranque
+  # dentro y que conteste. Deja la captura de pantalla y el logcat.
+  probar:
+    needs: apk
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: celestia-android
+          path: dist
+      - name: Activar KVM (el emulador lo necesita)
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Instalar, abrir y hablarle
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 31
+          arch: x86_64
+          target: google_apis
+          ram-size: 4096M
+          # Sin GPU en las máquinas de GitHub: renderizado por software, sin
+          # instantáneas ni animación de arranque, y más paciencia al encender.
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          emulator-boot-timeout: 900
+          disable-animations: true
+          script: bash android/probar_apk.sh dist/Celestia-Android.apk
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: prueba-android
+          path: prueba/
+
+  # Al etiquetar una versión, la APK va con los instaladores: aquí y en el
+  # repositorio público de la web, que es de donde descarga la página.
+  publicar:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [apk, probar]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      PUBLICAR_TOKEN: ${{ secrets.CELESTIA_PUBLICAR_TOKEN }}
+      # Sin la llave fija la APK sale con una de depuración, y el móvil que ya
+      # tiene Celestia no la deja instalar encima («App no instalada»): peor
+      # publicarla que no publicarla, porque la app la ofrecería como
+      # actualización y fallaría al instalarla.
+      APK_LLAVE: ${{ secrets.CELESTIA_APK_LLAVE }}
+    steps:
+      - name: ¿Hay llave?
+        if: env.APK_LLAVE == ''
+        run: echo "::warning::Sin CELESTIA_APK_LLAVE en este repositorio la APK no se publica"
+      # Sólo para las notas de la versión (lo que la app enseña al actualizar).
+      - uses: actions/checkout@v4
+        if: env.APK_LLAVE != ''
+      - uses: actions/download-artifact@v4
+        if: env.APK_LLAVE != ''
+        with:
+          name: celestia-android
+          path: dist
+      - uses: softprops/action-gh-release@v2
+        if: env.APK_LLAVE != ''
+        with:
+          files: dist/Celestia-Android.apk
+          body_path: instalador/NOTAS.md
+      - name: Publicar también en el repositorio de la web
+        if: env.PUBLICAR_TOKEN != '' && env.APK_LLAVE != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          repository: MomenTomato709/celestia
+          token: ${{ env.PUBLICAR_TOKEN }}
+          files: dist/Celestia-Android.apk

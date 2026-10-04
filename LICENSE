@@ -1,0 +1,33 @@
+Copyright (c) 2026 Enzo (proyecto Celestia)
+
+All rights reserved.
+
+This software and its source code are proprietary and confidential. No part of
+this software may be reproduced, distributed, modified, sublicensed, or used
+for any commercial purpose without prior written permission from the copyright
+holder.
+
+PERMITTED:
+- Personal study and inspection of the source code.
+- Forking for non-commercial educational use, provided the fork retains this
+  notice and is not redistributed without permission.
+
+NOT PERMITTED WITHOUT WRITTEN AUTHORIZATION:
+- Commercial use, hosting as a service, or integration into commercial products.
+- Redistribution of binaries, packaged or unpackaged.
+- Use of the name "Celestia" or derivatives in branding of derivative works.
+
+This license is intentionally restrictive while the project is in alpha and
+seeking funding/support. The intent is to relicense under a permissive open-source
+license (likely MIT or Apache 2.0) once the project reaches a stable v1.0.
+
+For commercial licensing, partnerships, or contributions inquiries, contact the
+copyright holder directly.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
