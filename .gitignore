@@ -125,3 +125,6 @@ examen/resultados/
 # Dentro de Celestia, pero tuyos y no del código: los instaladores fabricados y tus papeles.
 instaladores/
 papeles/
+
+# ─── Lo que Celestia se instala sola en un PC (Node, etc.: complementos.py) ───
+complementos/

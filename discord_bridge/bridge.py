@@ -226,7 +226,9 @@ def adjuntos_de(res: dict) -> list:
     el documento NO se borra: es un fichero del usuario que vive en su móvil.
     """
     adjuntos = []
-    for clave, nombre, sufijo in (("audio_b64", "celestia.ogg", ".ogg"),
+    # En un PC sin ffmpeg la voz llega en MP3 (audio_tipo «audio/mpeg»).
+    voz = ".mp3" if "mpeg" in (res.get("audio_tipo") or "") else ".ogg"
+    for clave, nombre, sufijo in (("audio_b64", f"celestia{voz}", voz),
                                   ("imagen_b64", "celestia.jpg", ".jpg")):
         dato = res.get(clave)
         if not dato:

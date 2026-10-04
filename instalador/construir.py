@@ -90,7 +90,7 @@ FUERA = ("tests", "examen", "roadmap", "site", "typings", "docs", "dist", "insta
          "local.sh", "celestia.sh", "hablar.sh", "diagnostico_widget.sh",
          "iniciar_whatsapp.sh", "cambiar_keys.sh")
 # Nunca, pase lo que pase con el .gitignore.
-PROHIBIDOS = (".env", "memoria", "logs", "recibidos", "voces_piper")
+PROHIBIDOS = (".env", "memoria", "logs", "recibidos", "voces_piper", "complementos")
 
 
 def _python_portatil(triple: str) -> Path:

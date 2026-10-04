@@ -13,9 +13,9 @@
 [tool.briefcase]
 project_name = "Celestia"
 bundle = "io.github.momentomato709"
-# Súbela en cada versión que se publique: Android sólo deja instalar encima
-# una versión igual o mayor que la que ya hay.
-version = "2.4.0"
+# Súbela en cada versión que se publique (y `version_code`, abajo): Android
+# sólo deja instalar encima una versión igual o mayor que la que ya hay.
+version = "1.0.0"
 url = "https://github.com/MomenTomato709"
 license.file = "LICENSE"
 author = "Enzo"
@@ -64,6 +64,13 @@ requirement_installer_args = ["--find-links", "./ruedas"]
 requires = [
     "toga-android~=0.5",
 ]
+# El número que Android compara para dejar instalar encima. Las versiones
+# empezaron de cero al hacerse público (4 oct 2026: la 1.0.0 vino después de
+# la 2.3.6 de pruebas), y el que calcula Briefcase solo (1000000) quedaría por
+# debajo del de la 2.3.6 (2030600): la app de Enzo no se dejaría actualizar.
+# Fórmula: 100000000 + mayor·1000000 + menor·10000 + parche·100 (lo vigila
+# tests/test_actualizar.py). 1.0.0 → 101000000.
+version_code = 101000000
 min_os_version = "26"
 # Los colores de Celestia en las barras del sistema y al abrir. Sin esto salía
 # el verde de la plantilla de Android arriba («se ve algo verde arriba

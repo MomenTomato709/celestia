@@ -81,7 +81,9 @@ const AUTH_DIR     = path.join(__dirname, "auth");
 // Si la API exige token, los fetches deben incluir el header X-Celestia-Token.
 function leerToken() {
     if (process.env.CELESTIA_API_TOKEN) return process.env.CELESTIA_API_TOKEN;
-    for (const ruta of ["/sdcard/Celestia/.env", path.join(__dirname, "..", ".env")]) {
+    const rutas = [process.env.CELESTIA_ENV_FILE, "/sdcard/Celestia/.env",
+                   path.join(__dirname, "..", ".env")].filter(Boolean);
+    for (const ruta of rutas) {
         try {
             const txt = fs.readFileSync(ruta, "utf8");
             // Gana la ÚLTIMA asignación no vacía, que es con la que se queda el
@@ -105,7 +107,13 @@ function apiHeaders(extra = {}) {
     return h;
 }
 const CONFIG_FILE  = path.join(__dirname, "numero.txt");
-const RECIBIDOS_DIR = "/sdcard/Celestia/recibidos";
+// En el móvil (Termux) todo vive en /sdcard/Celestia; en un PC, en la carpeta
+// de datos de Celestia, que es quien lanza el puente y se la dice
+// (canales.py). Lo que sólo existe en un Android —Shizuku, capturas, avisos
+// de Termux— se queda apagado fuera de él.
+const ES_MOVIL = fs.existsSync("/system/build.prop");
+const MOVIL_DIR = process.env.CELESTIA_MOVIL_DIR || "/sdcard/Celestia/.movil";
+const RECIBIDOS_DIR = process.env.CELESTIA_RECIBIDOS || "/sdcard/Celestia/recibidos";
 
 /* El nombre de un archivo que llega de fuera no es un nombre: es lo que el
    remitente ha querido escribir. Se queda solo la última parte (sin carpetas),
@@ -122,15 +130,15 @@ function nombreSeguro(nombre) {
     return (limpio && limpio !== "." && limpio !== "..") ? limpio : "";
 }
 // Lo que se cruza con el móvil vive en Celestia/.movil (antes, suelto en /sdcard).
-try { fs.mkdirSync("/sdcard/Celestia/.movil", { recursive: true }); } catch (_) {}
-const CODIGO_FILE  = "/sdcard/Celestia/.movil/codigo_whatsapp.txt";
-const ESTADO_FILE  = "/sdcard/Celestia/.movil/estado.txt";
-const SCREEN_FILE  = "/sdcard/Celestia/.movil/screen.png";
+try { fs.mkdirSync(MOVIL_DIR, { recursive: true }); } catch (_) {}
+const CODIGO_FILE  = path.join(MOVIL_DIR, "codigo_whatsapp.txt");
+const ESTADO_FILE  = path.join(MOVIL_DIR, "estado.txt");
+const SCREEN_FILE  = path.join(MOVIL_DIR, "screen.png");
 // Sesión 31 (Fase 1.5): OCR de pantalla y lista de apps instaladas.
 // `_BASE` para tesseract porque añade ".txt" automáticamente.
-const OCR_OUT_BASE  = "/sdcard/Celestia/.movil/ocr";
+const OCR_OUT_BASE  = path.join(MOVIL_DIR, "ocr");
 const OCR_OUT_FILE  = OCR_OUT_BASE + ".txt";
-const APPS_LIST_FILE = "/sdcard/Celestia/.movil/apps.txt";
+const APPS_LIST_FILE = path.join(MOVIL_DIR, "apps.txt");
 
 // Comandos UI embebidos en respuestas de Celestia
 // Sesión 31 (Fase 1.5): añadidos OPEN_APP, CLOSE_APP, APP_SWITCH, VOLUME, POWER,
@@ -187,16 +195,13 @@ http.createServer(async (req, res) => {
     req.on("data", c => body += c);
     req.on("end", async () => {
         try {
-            const { texto, audio_b64, imagen_b64, documento_ruta, documento_mime } = JSON.parse(body);
+            const { texto, audio_b64, audio_tipo, imagen_b64, documento_ruta, documento_mime } = JSON.parse(body);
             const sender = ultimoSender;
             if (!sockGlobal || !sender) {
                 res.writeHead(503); res.end(JSON.stringify({ error: "sin conexión activa" })); return;
             }
             if (texto)     await sockGlobal.sendMessage(sender, { text: texto });
-            if (audio_b64) {
-                const buf = Buffer.from(audio_b64, "base64");
-                await sockGlobal.sendMessage(sender, { audio: buf, mimetype: "audio/ogg; codecs=opus", ptt: true });
-            }
+            if (audio_b64) await sockGlobal.sendMessage(sender, mensajeDeAudio(audio_b64, audio_tipo));
             if (imagen_b64) {
                 const buf = Buffer.from(imagen_b64, "base64");
                 await sockGlobal.sendMessage(sender, { image: buf });
@@ -216,8 +221,18 @@ http.createServer(async (req, res) => {
     });
 }).listen(BRIDGE_PORT, "127.0.0.1", () => {
     console.log(`  Celestia puede enviar mensajes proactivos (puerto ${BRIDGE_PORT})`);
-    shizuku.iniciar();
+    if (ES_MOVIL) shizuku.iniciar();
 });
+
+/* El audio tal como llega de Celestia. OGG/Opus es una nota de voz de las de
+   WhatsApp; en un PC sin ffmpeg llega MP3 (audio_tipo «audio/mpeg») y se manda
+   como audio normal: etiquetado como nota de voz no sonaría. */
+function mensajeDeAudio(audio_b64, audio_tipo) {
+    const tipo = audio_tipo || "audio/ogg; codecs=opus";
+    const nota = tipo.includes("ogg") || tipo.includes("opus");
+    return { audio: Buffer.from(audio_b64, "base64"),
+             mimetype: nota ? "audio/ogg; codecs=opus" : tipo, ptt: nota };
+}
 
 function leerNumero() {
     try { return fs.readFileSync(CONFIG_FILE, "utf8").trim().replace(/\D/g, ""); }
@@ -227,12 +242,14 @@ const TELEFONO = (process.argv[2] || "").replace(/\D/g, "") || leerNumero();
 
 // ── Notificaciones Android ────────────────────────────────────────────────
 function notificar(titulo, mensaje, id = "celestia") {
+    if (!ES_MOVIL) return;                 // en un PC avisa Celestia, no Termux
     execFile("termux-notification", [
         "--id", id, "--title", titulo, "--content", mensaje,
         "--priority", "high", "--ongoing",
     ], () => {});
 }
 function notificarCancelar(id = "celestia") {
+    if (!ES_MOVIL) return;
     execFile("termux-notification-remove", [id], () => {});
 }
 function escribirEstado(texto) {
@@ -284,6 +301,7 @@ async function analizarCaptura(img_b64) {
 
 // ── Monitor continuo de pantalla ──────────────────────────────────────────
 async function iniciarMonitorPantalla() {
+    if (!ES_MOVIL) return;                 // mira la pantalla del móvil: en un PC no hay
     pantalla.monitorActivo = true;
     console.log("  👁  Monitor de pantalla activo\n");
 
@@ -887,8 +905,7 @@ async function procesarMensaje(sock, msg) {
     }
     if (resultado.audio_b64) {
         console.log("  → [audio]");
-        const buf = Buffer.from(resultado.audio_b64, "base64");
-        await sock.sendMessage(sender, { audio: buf, mimetype: "audio/ogg; codecs=opus", ptt: true });
+        await sock.sendMessage(sender, mensajeDeAudio(resultado.audio_b64, resultado.audio_tipo));
     }
     if (resultado.imagen_b64) {
         console.log("  → [imagen]");
@@ -1028,7 +1045,7 @@ async function iniciar(telefono) {
 // ── Arranque ──────────────────────────────────────────────────────────────
 async function main() {
     console.log("\n  ═══════════════════════════════════════");
-    console.log("    Bridge WhatsApp — Celestia v1.5");
+    console.log("    Bridge WhatsApp — Celestia");
     console.log("  ═══════════════════════════════════════\n");
 
     if (!TELEFONO) {

@@ -111,7 +111,7 @@ def cancelar() -> None:
 _procesos: Dict[str, subprocess.Popen] = {}
 
 
-def _lanzar(paso_id: str, orden: List[str], cwd: Path) -> str:
+def _lanzar(paso_id: str, orden: List[str], cwd: Path, env: Optional[dict] = None) -> str:
     """Arranca algo largo (npm, pip) sin bloquear la conversación.
 
     Bloquear tres minutos esperando a `npm install` deja a quien pregunta
@@ -121,15 +121,68 @@ def _lanzar(paso_id: str, orden: List[str], cwd: Path) -> str:
     if vivo and vivo.poll() is None:
         return "sigue en marcha"
     log = RAIZ / "logs" / f"guia_{paso_id}.log"
+    extra = {"creationflags": 0x08000000} if os.name == "nt" else {}   # sin ventana negra
     try:
         log.parent.mkdir(parents=True, exist_ok=True)
         with open(log, "wb") as f:
             _procesos[paso_id] = subprocess.Popen(
                 orden, cwd=str(cwd), stdout=f, stderr=subprocess.STDOUT,
-                stdin=subprocess.DEVNULL)
+                stdin=subprocess.DEVNULL, env=env, **extra)
         return "lo he puesto en marcha"
     except Exception as e:
         return f"no pude lanzarlo: {e}"
+
+
+# ── Lo que en un PC Celestia se pone sola (complementos.py) ─────────────────
+# En el móvil (Termux) Node y las librerías se instalaban a mano o con el
+# `python3`/`npm` del sistema; en un PC no hay ni lo uno ni lo otro, y en la
+# app de Android no se puede lanzar nada.
+
+def _es_app() -> bool:
+    return os.environ.get("CELESTIA_APP_ANDROID") == "1"
+
+
+def _paso_node() -> Paso:
+    from . import complementos
+    if complementos.se_puede():
+        def bajar() -> str:
+            estado = complementos.instalar_node()
+            return {"listo": "", "instalando": "me lo estoy bajando (unos 30 MB)",
+                    "fallo": "no he podido bajarlo, ¿hay internet?"}.get(estado, estado)
+        return Paso("node", "Node.js", comprobar=lambda: complementos.ruta_node() is not None,
+                    hacer=bajar, tarda=True)
+    if _es_app():
+        return Paso("node", "Node.js", comprobar=lambda: False,
+                    pedir="Desde la app de Android no puedo encender WhatsApp: el puente "
+                          "necesita Node.js y aquí dentro no se puede. Hazlo desde la "
+                          "Celestia del ordenador (o la de Termux) y me escribes igual.")
+    return Paso("node", "Node.js",
+                comprobar=lambda: complementos.ruta_node() is not None,
+                pedir="Me falta Node.js y este es el único paso que no puedo dar yo: "
+                      "el gestor de paquetes de Termux no me deja instalar nada desde "
+                      "aquí dentro. En una ventana de Termux (fuera del contenedor): "
+                      "`pkg install nodejs`.",
+                y_luego="Cuando lo tengas, dime «ya está» y sigo.")
+
+
+def _instalar_npm(wa: Path) -> str:
+    from . import complementos
+    npm = complementos.ruta_npm()
+    if not npm:
+        return "no encuentro npm"
+    return _lanzar("npm", [npm, "install", "--no-audit", "--no-fund"], wa,
+                   env=complementos.entorno_node())
+
+
+def _instalar_modulo(nombre: str, paquete: str, modulo: str) -> str:
+    """La librería de un puente: con el pip de esta Celestia (PC) o con el
+    python3 del sistema (Termux)."""
+    from . import complementos
+    if complementos.se_puede():
+        estado = complementos.instalar(f"canal-{nombre}", [paquete], modulo)
+        return {"listo": "", "instalando": "la estoy instalando",
+                "fallo": "no he podido instalarla, ¿hay internet?"}.get(estado, estado)
+    return _lanzar(f"pip_{nombre}", ["python3", "-m", "pip", "install", "--quiet", paquete], RAIZ)
 
 
 def _hay_modulo(nombre: str) -> bool:
@@ -210,16 +263,12 @@ def _guia_whatsapp(gestor) -> Guia:
                 "Tienes un par de minutos antes de que caduque.")
 
     return Guia("whatsapp", "hablar por WhatsApp", [
-        Paso("node", "Node.js",
-             comprobar=lambda: shutil.which("node") is not None,
-             pedir="Me falta Node.js y este es el único paso que no puedo dar yo: "
-                   "el gestor de paquetes de Termux no me deja instalar nada desde "
-                   "aquí dentro. En una ventana de Termux (fuera del contenedor): "
-                   "`pkg install nodejs`.",
-             y_luego="Cuando lo tengas, dime «ya está» y sigo."),
+        _paso_node(),
         Paso("dependencias", "las librerías del puente",
-             comprobar=lambda: (wa / "node_modules").is_dir(),
-             hacer=lambda: _lanzar("npm", ["npm", "install"], wa),
+             # npm escribe este índice al TERMINAR: con la carpeta a medias
+             # (instalación en curso o cortada) el puente no arrancaría.
+             comprobar=lambda: (wa / "node_modules" / ".package-lock.json").is_file(),
+             hacer=lambda: _instalar_npm(wa),
              tarda=True),
         Paso("numero", "tu número",
              comprobar=lambda: bool(_numero_guardado()),
@@ -247,9 +296,7 @@ def _guia_telegram(gestor) -> Guia:
              y_luego="En cuanto me lo pases, sigo yo con lo demás."),
         Paso("modulo", "la librería de Telegram",
              comprobar=lambda: _hay_modulo("telegram"),
-             hacer=lambda: _lanzar("pip_telegram",
-                                   ["python3", "-m", "pip", "install", "--quiet",
-                                    "python-telegram-bot>=21.0"], RAIZ),
+             hacer=lambda: _instalar_modulo("telegram", "python-telegram-bot>=21.0", "telegram"),
              tarda=True),
         Paso("puente", "el puente en marcha",
              comprobar=lambda: gestor.esta_vivo("telegram"),
@@ -277,9 +324,7 @@ def _guia_discord(gestor) -> Guia:
                    "INTENT**, o el bot no podrá leer lo que le escribas."),
         Paso("modulo", "la librería de Discord",
              comprobar=lambda: _hay_modulo("discord"),
-             hacer=lambda: _lanzar("pip_discord",
-                                   ["python3", "-m", "pip", "install", "--quiet",
-                                    "discord.py"], RAIZ),
+             hacer=lambda: _instalar_modulo("discord", "discord.py", "discord"),
              tarda=True),
         Paso("puente", "el puente en marcha",
              comprobar=lambda: gestor.esta_vivo("discord"),

@@ -126,17 +126,31 @@ async def manejar_texto(update, context):
     respuesta_texto = res.get("texto", "")
     if respuesta_texto:
         await update.message.reply_text(respuesta_texto)
+    try:
+        await enviar_audio(update, res)
+    except Exception as e:
+        logger.warning("No pude enviar voice: %s", e)
+
+
+async def enviar_audio(update, res: dict) -> None:
+    """Su voz. OGG/Opus es una nota de voz de Telegram; en un PC sin ffmpeg
+    llega MP3 (audio_tipo «audio/mpeg») y va como audio normal: como nota de
+    voz Telegram no lo reproduciría."""
     audio_b64 = res.get("audio_b64")
-    if audio_b64:
-        try:
-            buf = base64.b64decode(audio_b64)
-            with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as f:
-                f.write(buf)
-                ruta = f.name
-            await update.message.reply_voice(voice=open(ruta, "rb"))
-            os.unlink(ruta)
-        except Exception as e:
-            logger.warning("No pude enviar voice: %s", e)
+    if not audio_b64:
+        return
+    es_mp3 = "mpeg" in (res.get("audio_tipo") or "") or "mp3" in (res.get("audio_tipo") or "")
+    with tempfile.NamedTemporaryFile(suffix=".mp3" if es_mp3 else ".ogg", delete=False) as f:
+        f.write(base64.b64decode(audio_b64))
+        ruta = f.name
+    try:
+        with open(ruta, "rb") as audio:
+            if es_mp3:
+                await update.message.reply_audio(audio=audio, title="Celestia")
+            else:
+                await update.message.reply_voice(voice=audio)
+    finally:
+        os.unlink(ruta)
 
 
 async def manejar_voz(update, context):
@@ -153,14 +167,7 @@ async def manejar_voz(update, context):
         texto = res.get("texto", "")
         if texto:
             await update.message.reply_text(texto)
-        audio_b64 = res.get("audio_b64")
-        if audio_b64:
-            buf = base64.b64decode(audio_b64)
-            with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as f:
-                f.write(buf)
-                ruta = f.name
-            await update.message.reply_voice(voice=open(ruta, "rb"))
-            os.unlink(ruta)
+        await enviar_audio(update, res)
     except Exception as e:
         logger.exception("Error procesando audio: %s", e)
         await update.message.reply_text(f"⚠ No pude procesar el audio: {e}")

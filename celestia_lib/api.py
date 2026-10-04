@@ -4059,14 +4059,11 @@ class WhatsAppAPI:
                 if not Path(mp3).exists():
                     raise RuntimeError("edge-tts no dejó el audio")
             if not shutil.which("ffmpeg"):
-                # Un PC normal no trae ffmpeg. El OGG es para las notas de voz
-                # de WhatsApp; el chat web reproduce el MP3 tal cual. A un
-                # puente no se le da: el de WhatsApp lo mandaría etiquetado
-                # como OGG/Opus y la nota no sonaría (lo cazó Codex).
-                if (bandeja.CANAL_PETICION.get() or "web") in ("web", ""):
-                    return mp3
-                Path(mp3).unlink(missing_ok=True)
-                return None
+                # Un PC normal no trae ffmpeg: va el MP3 tal cual. El chat web lo
+                # reproduce, y los puentes (WhatsApp, Telegram, Discord) miran
+                # `audio_tipo` y lo mandan como audio normal, no como nota de
+                # voz (etiquetado OGG/Opus no sonaría; lo cazó Codex).
+                return mp3
             ret_ff = subprocess.run(
                 ["ffmpeg", "-y", "-i", mp3, "-c:a", "libopus", "-b:a", "24k", "-ar", "16000", ogg],
                 capture_output=True, timeout=30,

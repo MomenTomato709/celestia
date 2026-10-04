@@ -180,6 +180,27 @@ def _python_puente() -> str:
     return str(exe)
 
 
+def _node_puente() -> str:
+    """El `node` del sistema o el que se bajó Celestia (en un PC; ver complementos)."""
+    from . import complementos
+    return complementos.ruta_node() or "node"
+
+
+def _requiere_node() -> Callable[[], Optional[str]]:
+    def _check() -> Optional[str]:
+        from . import complementos
+        if complementos.ruta_node():
+            return None
+        if complementos.se_puede():
+            return ("me falta Node.js; me lo bajo yo si me dices «quiero hablar por "
+                    "WhatsApp»")
+        if os.environ.get("CELESTIA_APP_ANDROID") == "1":
+            return ("WhatsApp no se puede encender desde la app de Android (necesita "
+                    "Node.js): hazlo desde la Celestia del ordenador o de Termux")
+        return "falta el ejecutable «node» (instala Node.js: en Termux, pkg install nodejs)"
+    return _check
+
+
 def _aqui() -> str:
     """Cómo se llama el canal local: en el móvil es Termux; en un PC, el chat."""
     return "Termux" if ES_ANDROID else "el chat"
@@ -197,15 +218,15 @@ def _catalogo() -> Dict[str, Canal]:
         "whatsapp": Canal(
             nombre="whatsapp",
             descripcion="WhatsApp vía Baileys (Node.js)",
-            comando=["node", "bridge.js"],
+            comando=[_node_puente(), "bridge.js"],
             cwd=wa_dir,
             patron_proceso="bridge[.]js",
             binario="node",
             patron_listo=r"WhatsApp vinculado|Celestia está lista|CÓDIGO:",
             requisitos=[
-                _requiere_binario("node", "instala Node.js en el PRoot"),
+                _requiere_node(),
                 _requiere_ruta(wa_dir / "node_modules",
-                               "ejecuta: cd whatsapp_bridge && npm install"),
+                               "me las instalo yo si me dices «quiero hablar por WhatsApp»"),
             ],
             aliases=["wa", "whats", "guasap", "wasap"],
         ),
@@ -919,6 +940,15 @@ class GestorCanales:
         # lanzador coge el primero libre). La API lo deja dicho al arrancar.
         env.setdefault("CELESTIA_API_URL", "http://127.0.0.1:8765")
         env.setdefault("PYTHONUTF8", "1")
+        if not ES_ANDROID:
+            # El puente de WhatsApp: en el móvil usa /sdcard/Celestia; en un PC,
+            # las carpetas de Celestia. Y el Node que se bajó, delante.
+            from . import complementos
+            from .paths import RECIBIDOS_DIR
+            env.setdefault("CELESTIA_MOVIL_DIR", str(MEM_DIR / "puente_whatsapp"))
+            env.setdefault("CELESTIA_RECIBIDOS", str(RECIBIDOS_DIR))
+            env.setdefault("CELESTIA_ENV_FILE", str(ENV_FILE))
+            env = complementos.entorno_node(env)
         return env
 
     # ── Estado y preferencia ─────────────────────────────────────────────────
