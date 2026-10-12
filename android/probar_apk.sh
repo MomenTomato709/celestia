@@ -24,7 +24,11 @@ echo "✓ Celestia contesta dentro del móvil (~$((i * 3)) s)"
 sleep 8                                   # que la vista web cargue el chat
 adb exec-out screencap -p > prueba/captura.png
 
-python3 - <<'EOF' || fallo "las comprobaciones no pasan"
+# Cada comprobación dice lo suyo y se sigue con la siguiente: un fallo de fuera
+# (12 oct 2026: la voz de Microsoft daba 403 también desde la nube) no debe tapar
+# si lo demás funciona. La prueba falla igual, al final, si algo no pasa.
+PENDIENTE=""
+python3 - <<'EOF' || PENDIENTE="las comprobaciones de dentro no pasan (arriba, cuál)"
 import json, urllib.request
 base = "http://127.0.0.1:8765"
 estado = json.load(open("prueba/estado.json"))
@@ -48,14 +52,19 @@ json.dump(s, open("prueba/sentidos.json", "w"), ensure_ascii=False, indent=1)
 sentidos = {x["id"]: x for x in s["sentidos"]}
 print("  sentidos:", {k: (v["ok"], v["como"]) for k, v in sentidos.items()})
 print("  pruebas:", s.get("pruebas"))
-assert sentidos["hablar"]["ok"], sentidos["hablar"]
-assert s["pruebas"]["hablar"] is True, s["pruebas"]
-print("✓ habla (edge-tts dentro de la app)")
-assert sentidos["buscar"]["como"] == "varios buscadores a la vez", sentidos["buscar"]
-assert s["pruebas"]["primp"] in (200, 204), s["pruebas"]
-print("✓ primp (el motor del metabuscador) funciona dentro de la app")
-assert isinstance(s["pruebas"]["buscar"], int) and s["pruebas"]["buscar"] > 0, s["pruebas"]
-print("✓ busca con el metabuscador")
+mal = []
+def mirar(bien, que):
+    print(("✓ " if bien else "✗ ") + que)
+    if not bien:
+        mal.append(que)
+mirar(sentidos["hablar"]["ok"] and s["pruebas"]["hablar"] is True,
+      "habla (edge-tts dentro de la app; mira «[TTS]» en el logcat)")
+mirar(sentidos["buscar"]["como"] == "varios buscadores a la vez"
+      and s["pruebas"]["primp"] in (200, 204),
+      "primp (el motor del metabuscador) funciona dentro de la app")
+mirar(isinstance(s["pruebas"]["buscar"], int) and s["pruebas"]["buscar"] > 0,
+      "busca con el metabuscador")
+assert not mal, mal
 EOF
 
 # Viva con la app cerrada (12 oct 2026): el servicio en primer plano la sostiene,
@@ -79,6 +88,7 @@ adb logcat -d | grep -q "el servidor ya estaba en marcha" || fallo "al reabrirla
 curl -sf http://127.0.0.1:8765/estado -o /dev/null || fallo "al reabrirla, Celestia no contesta"
 adb exec-out screencap -p > prueba/captura_reabierta.png
 echo "✓ al reabrirla, la misma Celestia (sin arrancar otra encima)"
+[ -z "$PENDIENTE" ] || fallo "$PENDIENTE"
 
 adb logcat -d > prueba/logcat.txt
 echo "✓ la APK funciona"
