@@ -74,15 +74,19 @@ grep -q "ServicioCelestia" prueba/servicios.txt || fallo "el servicio que la man
 grep -q "isForeground=true" prueba/servicios.txt || fallo "el servicio no está en primer plano"
 echo "✓ el servicio en primer plano está en marcha"
 PID=$(adb shell pidof "$PAQUETE" | tr -d '\r')
-adb shell settings put global always_finish_activities 1    # al salir, Android destruye el chat
 adb shell input keyevent KEYCODE_HOME
 sleep 20
 curl -sf http://127.0.0.1:8765/estado -o /dev/null || fallo "con la app cerrada, Celestia no contesta"
 [ "$(adb shell pidof "$PAQUETE" | tr -d '\r')" = "$PID" ] || fallo "con la app cerrada, el proceso ha muerto"
 echo "✓ con la app cerrada sigue viva y contesta"
-adb shell monkey -p "$PAQUETE" -c android.intent.category.LAUNCHER 1 >/dev/null || fallo "no se reabre"
+# Reabrirla limpiando su tarea: Android destruye el chat y lo crea de nuevo en el
+# mismo proceso, y vuelve a ejecutar la app entera (MainActivity.onCreate), como
+# cuando se quita de recientes y se vuelve a abrir. (Con «no conservar
+# actividades» puesto por adb, Android 12 no la destruía: sólo onStop/onRestart.)
+adb shell am start -W --activity-clear-task -n "$PAQUETE/org.beeware.android.MainActivity" >/dev/null \
+  || fallo "no se reabre"
 sleep 15
-adb shell settings put global always_finish_activities 0
+adb logcat -d | grep -q "MainActivity: onDestroy" || fallo "al reabrirla, Android no destruyó el chat (la prueba no prueba nada)"
 [ "$(adb shell pidof "$PAQUETE" | tr -d '\r')" = "$PID" ] || fallo "al reabrirla, el proceso es otro"
 adb logcat -d | grep -q "el servidor ya estaba en marcha" || fallo "al reabrirla no reutilizó su servidor"
 curl -sf http://127.0.0.1:8765/estado -o /dev/null || fallo "al reabrirla, Celestia no contesta"
