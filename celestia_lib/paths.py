@@ -107,3 +107,58 @@ PROYECTOS_DIR = SALIDA_DIR / "proyectos"
 # Crear al importar para que existan antes de cualquier uso
 for _d in (MEM_DIR, LOG_DIR, SKILLS_DIR):
     _d.mkdir(parents=True, exist_ok=True)
+
+
+# ── El jugador sólo está en la copia de Enzo ─────────────────────────────────
+# Enzo, 4 oct 2026: «quiero que lo tengamos pero que nadie lo pueda utilizar,
+# sólo yo». Casi todos los juegos prohíben que un programa juegue por ti, y
+# publicarlo le podía perjudicar. La copia pública (instalador/copia_publica.py)
+# no lleva jugador.py ni lo de ZZZ; el resto de Celestia mira esto y sigue.
+_HAY_JUGADOR: list = []
+
+
+def hay_jugador() -> bool:
+    if not _HAY_JUGADOR:
+        import importlib.util
+        _HAY_JUGADOR.append(importlib.util.find_spec("celestia_lib.jugador") is not None)
+    return _HAY_JUGADOR[0]
+
+
+# ── Ejecutar un script suelto (una habilidad aprendida, una de domótica) ─────
+# Con `python3` a secas, como en el móvil. En un PC instalado no existe: en
+# Windows lo que contesta es el aviso de la Tienda («no se encontró Python»,
+# con tildes en otra codificación) y «aprende a…» no funcionaba nunca
+# (portátil, 4 oct 2026). Se usa el mismo Python que mueve a Celestia.
+SIN_VENTANA = {"creationflags": 0x08000000} if os.name == "nt" else {}
+
+
+def python_de_scripts() -> str:
+    import sys
+    exe = Path(sys.executable) if sys.executable else None
+    if exe is None or not exe.exists():
+        return "python3"                     # la app de Android (Chaquopy) no tiene
+    # pythonw no tiene salida: su hermano con consola (sin ventana, SIN_VENTANA).
+    if exe.name.lower() == "pythonw.exe" and (exe.parent / "python.exe").exists():
+        return str(exe.parent / "python.exe")
+    return str(exe)
+
+
+def entorno_de_scripts(base: dict) -> dict:
+    """Lo mínimo para que ese Python arranque, más `base`. En Windows, sin
+    SYSTEMROOT ni siquiera arranca; y en todos, la salida en UTF-8."""
+    entorno = dict(base)
+    if os.name == "nt":
+        for var in ("SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT"):
+            if os.environ.get(var):
+                entorno.setdefault(var, os.environ[var])
+        carpeta = str(Path(python_de_scripts()).parent)
+        sistema = os.path.join(os.environ.get("SYSTEMROOT", r"C:\Windows"), "System32")
+        entorno["PATH"] = os.pathsep.join([carpeta, sistema])
+        casa = entorno.get("HOME")
+        if casa:
+            entorno.setdefault("USERPROFILE", casa)
+            entorno.setdefault("TEMP", casa)
+            entorno.setdefault("TMP", casa)
+    entorno.setdefault("PYTHONUTF8", "1")
+    entorno.setdefault("PYTHONIOENCODING", "utf-8")
+    return entorno

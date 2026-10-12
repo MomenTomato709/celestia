@@ -44,10 +44,10 @@ def _apuntar_resultado(texto: str) -> None:
     del _RESULTADOS_RECIENTES[:-6]
 
 from . import actividad
-from .connectivity import ConnectivityManager
+from .connectivity import ConnectivityManager, escucha
 from .domotica import DomoticaManager
 from .paths import (DATOS, DOCUMENTOS_DIR, ES_ANDROID, IMAGENES_DIR, MEM_DIR, ROOT,
-                    SALIDA_DIR, SIN_MOVIL, SKILLS_DIR)
+                    SALIDA_DIR, SIN_MOVIL, SKILLS_DIR, hay_jugador)
 from .reminders import ReminderManager
 from .tz import ahora_usuario
 from .vault import GestorContrasenas
@@ -523,38 +523,11 @@ class AgentTools:
         self._domotica = DomoticaManager()
         self._vault = GestorContrasenas()
 
-    # Cadena de búsqueda: DDG Instant → Wikipedia (es/en) → DDG HTML scraping.
-    # DDG Instant cubre Wikipedia/calculator/conversions de forma compacta.
-    # Wikipedia API es gratis sin key, devuelve extractos limpios — útil
-    # cuando DDG no tiene Instant Answer. DDG HTML (POST) extrae snippets
-    # de resultados reales para queries de actualidad sin entrada en Wiki.
-    # Bug visto sesión 28: con sólo DDG Instant + lite scraping, "capital de
-    # Argentina" devolvía "Sin resultados" porque DDG no tiene Instant para
-    # esa query y el `lite` no extrae el resultado top.
-
-    def _ddg_instant(self, query: str) -> str:
-        """DuckDuckGo Instant Answer API — Wikipedia compacta, cálculos, conversiones."""
-        try:
-            r = _req.get(
-                "https://api.duckduckgo.com/",
-                params={"q": query, "format": "json", "no_html": "1", "skip_disambig": "1"},
-                headers={"User-Agent": "Celestia/1.5"}, timeout=10,
-            )
-            try:
-                data = r.json()
-            except Exception:
-                return ""
-            out = data.get("AbstractText") or data.get("Answer") or ""
-            if not out and data.get("RelatedTopics"):
-                out = "\n".join(
-                    t.get("Text", "") for t in data["RelatedTopics"][:3]
-                    if isinstance(t, dict) and t.get("Text")
-                )
-            if out and data.get("AbstractURL"):
-                out += f"\nFuente: {data['AbstractURL']}"
-            return out.strip()
-        except Exception:
-            return ""
+    # Cadena de búsqueda (buscar_web): fuentes directas → SearXNG → ddgs →
+    # Wikipedia (es/en) → Tavily. Wikipedia es gratis sin key y devuelve
+    # extractos limpios. DuckDuckGo
+    # (su Instant Answer y su HTML) ya no se usa: Enzo, 6 oct 2026, «no quiero
+    # DuckDuckGo porque es basura, por eso quería los metabuscadores».
 
     def _wikipedia_extract(self, query: str, lang: str = "es") -> str:
         """Wikipedia API: busca el primer match y devuelve su extracto en texto plano.
@@ -612,66 +585,6 @@ class AgentTools:
         """Quita etiquetas y colapsa espacios de un fragmento de HTML."""
         return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", html)).strip()
 
-    def _ddg_html_scrape(self, query: str) -> str:
-        """Scraping de html.duckduckgo.com (POST). Resultados reales con snippet.
-
-        Más robusto que el `lite.duckduckgo.com` anterior — el HTML completo
-        sí tiene snippets indexables con `class="result__snippet"`.
-        """
-        try:
-            r = _req.post(
-                "https://html.duckduckgo.com/html/",
-                data={"q": query},
-                headers={"User-Agent": "Mozilla/5.0 (Celestia/1.5)"},
-                timeout=10,
-            )
-            # Buscamos snippets de resultados no-publicitarios.
-            # Patrón: <a class="result__snippet" ...>TEXTO</a>
-            snippets = re.findall(
-                r'class=["\']result__snippet["\'][^>]*>(.*?)</a>',
-                r.text, re.DOTALL,
-            )
-            if not snippets:
-                # Algunos resultados usan estructura distinta; intentar snippet sin href
-                snippets = re.findall(
-                    r'<div class="snippet">(.*?)</div>', r.text, re.DOTALL,
-                )
-            # Los TÍTULOS también entran (sesión 44). Muchos snippets son puro
-            # relleno SEO («cuatro contendientes de frontera») mientras que el
-            # título lleva el dato («Claude vs GPT-5 vs Gemini, agosto 2026»).
-            # Sin ellos el modelo se quedaba sin nombres concretos y rellenaba
-            # el hueco con su conocimiento caducado.
-            titulos = re.findall(
-                r'class=["\']result__a["\'][^>]*>(.*?)</a>', r.text, re.DOTALL,
-            )
-            # Los enlaces, para poder abrir la página si el resumen no basta.
-            # DuckDuckGo los envuelve en /l/?uddg=<url codificada>.
-            enlaces = re.findall(r'class=["\']result__a["\'][^>]*href=["\']([^"\']+)', r.text)
-            if not enlaces:
-                enlaces = re.findall(r'href=["\'](//duckduckgo\.com/l/\?uddg=[^"\']+)', r.text)
-            urls = []
-            for href in enlaces[:5]:
-                m = re.search(r"uddg=([^&]+)", href)
-                urls.append(urllib.parse.unquote(m.group(1)) if m else href)
-            self._ultimas_urls = [u for u in urls if u.startswith("http")]
-            limpios = []
-            for i in range(max(len(snippets), len(titulos))):
-                titulo = self._texto_plano(titulos[i]) if i < len(titulos) else ""
-                cuerpo = self._texto_plano(snippets[i]) if i < len(snippets) else ""
-                if cuerpo and len(cuerpo) <= 30:   # ruido: «Ver más», fechas sueltas
-                    cuerpo = ""
-                if cuerpo and titulo and cuerpo.lower().startswith(titulo.lower()[:40]):
-                    titulo = ""                    # el snippet repite el título
-                if titulo and cuerpo:
-                    limpios.append(f"{titulo} — {cuerpo}")
-                elif titulo or cuerpo:
-                    limpios.append(titulo or cuerpo)
-                if len(limpios) >= 8:              # 8 resultados, no 3
-                    break
-            return "\n".join(self._primero_los_que_traen_el_dato(query, limpios))
-        except Exception:
-            return ""
-
     # ── Metabuscador (ddgs): el SearXNG de los aparatos que no lo tienen ──
     # En el móvil buscaba el SearXNG propio (varios buscadores a la vez).
     # Instalada en un PC no hay SearXNG y todo dependía del HTML de
@@ -680,8 +593,10 @@ class AgentTools:
     # verdad: 12 búsquedas seguidas el 4 oct 2026, las 12 con resultados
     # buenos, ~2 s cada una. Bing a pelo se descartó: a un programa le
     # devuelve páginas que sólo coinciden en una palabra («precio del bitcoin»
-    # → tasas de la Comunidad de Madrid). En la app de Android no existe
-    # (su motor HTTP no está compilado para Android) y se sigue sin él.
+    # → tasas de la Comunidad de Madrid). Sin DuckDuckGo entre sus buscadores
+    # (Enzo, 6 oct 2026), ni Grokipedia (enciclopedia escrita por una IA).
+    _DDGS_BUSCADORES = "google, brave, startpage, mojeek, yahoo, wikipedia"
+
     def _ddgs(self, query: str) -> str:
         """Resultados de ddgs (título — resumen). Vacío si no está o falla."""
         try:
@@ -690,7 +605,7 @@ class AgentTools:
             return ""
         try:
             resultados = DDGS(timeout=10).text(query, region="es-es", max_results=8,
-                                               backend="auto") or []
+                                               backend=self._DDGS_BUSCADORES) or []
         except (KeyboardInterrupt, SystemExit):
             raise
         except BaseException as e:
@@ -947,6 +862,8 @@ class AgentTools:
         if time.time() - estado["visto"] > 300:
             estado["visto"] = time.time()
             try:
+                if not escucha(cls._SEARXNG_LOCAL):
+                    raise OSError("nadie escucha")
                 with urllib.request.urlopen(f"{cls._SEARXNG_LOCAL}/healthz", timeout=0.5) as r:
                     estado["vivo"] = 1.0 if r.status == 200 else 0.0
             except Exception:
@@ -1665,7 +1582,7 @@ class AgentTools:
         if not HAS_REQUESTS:
             return "⚠ requests no instalado. Ejecuta: pip install requests"
 
-        # Validar query — sin esto, "" llega a DDG y devuelve HTML no-JSON
+        # Validar query — sin esto, "" llega al buscador y devuelve HTML no-JSON
         # que rompe json() con "Expecting value". Bug visto sesión 28.
         query = (query or "").strip()
         if not query:
@@ -1706,7 +1623,7 @@ class AgentTools:
         if query_fresca != query:
             logger.info("Query anclada en el tiempo: %.60s", query_fresca)
 
-        # Cadena: DDG Instant → Wikipedia (es, luego en) → DDG HTML scraping.
+        # Cadena: fuentes directas → SearXNG → ddgs → Wikipedia (es, luego en) → Tavily.
         # Sesión 45 — con una pregunta de actualidad, Wikipedia va la ÚLTIMA:
         # es enciclopédica, no un periódico, y su opensearch devuelve el
         # artículo de título más parecido aunque sea de hace siete años
@@ -1717,27 +1634,19 @@ class AgentTools:
         _titulares = ("titulares", lambda: self._titulares_del_dia(query))
         _musica = ("musica", lambda: self._musica_top(query))
         _searxng = ("searxng", lambda: self._searxng(query_fresca if query_fresca != query_buscador else query_buscador))
-        _ddg_fresca = ("ddg_html_fresca", lambda: self._ddg_html_scrape(query_fresca)
-                       if query_fresca != query else "")
-        _instant = ("ddg_instant", lambda: self._ddg_instant(query_buscador))
         _wiki_es = ("wikipedia_es", lambda: self._wikipedia_extract(query, "es"))
         _wiki_en = ("wikipedia_en", lambda: self._wikipedia_extract(query, "en"))
-        _ddg = ("ddg_html", lambda: self._ddg_html_scrape(query_buscador))
-        # El metabuscador delante del HTML de DuckDuckGo: varios buscadores y
-        # sin captchas. Donde no está (la app de Android), sigue DuckDuckGo.
+        # Los metabuscadores: el SearXNG propio y, donde no lo hay, ddgs (varios
+        # buscadores a la vez). Nada de DuckDuckGo (Enzo, 4 y 6 oct 2026).
         _ddgs_fresca = ("ddgs_fresca", lambda: self._ddgs(query_fresca)
                         if query_fresca != query else "")
         _ddgs = ("ddgs", lambda: self._ddgs(query_buscador))
         _tavily = ("tavily", lambda: self._tavily(query_buscador))
         # Cada cadena en UNA línea: test_searxng y test_tavily leen el orden de aquí.
         if query_fresca != query:
-            cadena = (_cotizacion, _deportes, _musica, _titulares, _searxng, _ddgs_fresca, _ddg_fresca, _instant, _ddgs, _ddg, _wiki_es, _wiki_en, _tavily)
+            cadena = (_cotizacion, _deportes, _musica, _titulares, _searxng, _ddgs_fresca, _ddgs, _wiki_es, _wiki_en, _tavily)
         else:
-            cadena = (_cotizacion, _deportes, _musica, _titulares, _searxng, _instant, _wiki_es, _wiki_en, _ddgs, _ddg, _tavily)
-        # En la app de Android, nada de DuckDuckGo (Enzo, 4 oct 2026): busca
-        # con su SearXNG, con el metabuscador o con las fuentes directas.
-        if os.environ.get("CELESTIA_APP_ANDROID") == "1":
-            cadena = tuple(p for p in cadena if not p[0].startswith("ddg_"))
+            cadena = (_cotizacion, _deportes, _musica, _titulares, _searxng, _wiki_es, _wiki_en, _ddgs, _tavily)
         for proveedor, fn in cadena:
             try:
                 out = fn()
@@ -1749,8 +1658,7 @@ class AgentTools:
                 # enlace y se lee el artículo. Sólo con las fuentes de
                 # búsqueda: las directas (cotización, deportes, música) ya
                 # devuelven el dato exacto y no hay nada que ampliar.
-                if proveedor in ("searxng", "ddg_html", "ddg_html_fresca", "ddgs", "ddgs_fresca",
-                                 "tavily"):
+                if proveedor in ("searxng", "ddgs", "ddgs_fresca", "tavily"):
                     out = self._ampliar_leyendo_paginas(query, out.strip())
                 out = out.strip()[:2500]
                 # Con las direcciones enteras: el recorte de 2.500 puede dejar
@@ -2667,6 +2575,16 @@ class AgentTools:
         )
         if not permitida:
             return None
+        # Lo vetado aunque cuelgue de una raíz permitida: la copia del examen de
+        # nivel no puede leer el repositorio de verdad (respuestas, pruebas
+        # escondidas, la entrega del rival), que en el móvil ES el home.
+        for vetada in os.environ.get("CELESTIA_RUTAS_VETADAS", "").split(os.pathsep):
+            if vetada.strip():
+                try:
+                    if p.is_relative_to(Path(vetada.strip()).expanduser().resolve()):
+                        return None
+                except (OSError, ValueError):
+                    return None
         # Componentes y nombre del archivo no deben coincidir con patrones sensibles
         nombre_low = p.name.lower()
         for patron in cls._PATRONES_SENSIBLES:
@@ -3161,8 +3079,19 @@ class AgentTools:
         size_kb = p.stat().st_size // 1024
         return f"__DOCUMENTO__:{p}|{mime}|✓ Enviando '{p.name}' ({size_kb}KB)"
 
-    def generar_imagen(self, prompt: str, ancho: int = 1024, alto: int = 1024) -> str:
-        """Genera una imagen con Pollinations.ai (gratis, sin clave)."""
+    def generar_imagen(self, prompt: str, ancho: int = 1024, alto: int = 1024,
+                       peticion: str = "") -> str:
+        """Genera una imagen con Pollinations.ai (gratis, sin clave).
+
+        Si la petición lleva textos entre comillas («que ponga «Viernes de mechas
+        -20 %»»), es un cartel: el generador sólo hace el fondo y el texto lo pone
+        `cartel.py`, letra a letra (examen de nivel, 7 oct 2026: la IA dibujó una
+        chica sin una sola letra)."""
+        from . import cartel
+        pedido = peticion or prompt
+        textos = cartel.textos_de(pedido)
+        if textos:
+            return self._generar_cartel(pedido, textos)
         if self.connectivity and not self.connectivity.is_online():
             return "⚠ Necesito conexión a internet para generar imágenes."
         try:
@@ -3202,6 +3131,60 @@ class AgentTools:
             return f"__IMAGEN__:{ruta}|✓ Imagen generada ({size_kb}KB): '{prompt[:60]}'"
         except Exception as e:
             return f"✗ No pude generar la imagen: {e}"
+
+    def _descargar_imagen(self, prompt: str, ancho: int, alto: int, ruta: Path) -> Path:
+        """Una imagen de Pollinations a `ruta` (a trozos y con tope de tamaño)."""
+        import urllib.parse
+        url = (f"https://image.pollinations.ai/prompt/{urllib.parse.quote(prompt[:500])}"
+               f"?width={ancho}&height={alto}&seed={random.randint(1, 99999)}&nologo=true")
+        req = urllib.request.Request(
+            url, headers={"User-Agent": "Mozilla/5.0 (compatible; Celestia/1.5)"})
+        ruta.parent.mkdir(parents=True, exist_ok=True)
+        tmp = ruta.with_name(ruta.name + ".parcial")
+        leidos = 0
+        with urllib.request.urlopen(req, timeout=90) as r, open(tmp, "wb") as f:
+            while True:
+                trozo = r.read(256 * 1024)
+                if not trozo:
+                    break
+                leidos += len(trozo)
+                if leidos > MAX_IMAGEN_BYTES:
+                    f.close()
+                    tmp.unlink(missing_ok=True)
+                    raise ValueError(f"pesa más de {MAX_IMAGEN_BYTES // (1024 * 1024)} MB")
+                f.write(trozo)
+        os.replace(tmp, ruta)
+        return ruta
+
+    def _generar_cartel(self, peticion: str, textos: List[str]) -> str:
+        """Fondo de Pollinations (sin letras) + los textos exactos encima. Sin red,
+        el fondo es un degradado: el cartel sale igual."""
+        from . import cartel
+        ts = int(time.time())
+        nombre = re.sub(r"[^\w]", "_", textos[0][:40].lower()).strip("_") or "cartel"
+        fondo = None
+        if not (self.connectivity and not self.connectivity.is_online()):
+            w, h = cartel.tamano_fondo(peticion)
+            for intento in range(2):                   # Pollinations falla a ratos
+                try:
+                    fondo = self._descargar_imagen(cartel.prompt_fondo(peticion, textos), w, h,
+                                                   IMAGENES_DIR / f"{nombre}_{ts}_fondo.jpg")
+                    break
+                except Exception as e:
+                    logger.info("Cartel: sin fondo de Pollinations (%s)%s", e,
+                                "; va con el fondo diseñado" if intento else "; otra vez")
+                    if not intento:
+                        time.sleep(2)              # su nivel gratuito limita por segundos
+        try:
+            ruta = cartel.componer(fondo, peticion, IMAGENES_DIR / f"{nombre}_{ts}.png", textos)
+        except Exception as e:
+            return f"✗ No pude montar la imagen: {e}"
+        finally:
+            if fondo:
+                Path(fondo).unlink(missing_ok=True)
+        w, h = cartel.formato_de(peticion)
+        lista = " · ".join(f"«{x}»" for x in textos)
+        return f"__IMAGEN__:{ruta}|✓ Aquí la tienes ({w}×{h} px), con el texto {lista}."
 
     def buscar_duplicados(self, ruta: str = ".") -> str:
         """Detecta archivos duplicados por hash.
@@ -4185,6 +4168,20 @@ class AgentTools:
     # De ésas, las que en un ordenador sí tienen sentido y hace pc.py.
     _EN_UN_PC = frozenset({"abrir_app", "cerrar_app", "cambiar_volumen"})
 
+    # Las que viven en jugador.py y zzz.py, que sólo están en la copia de Enzo
+    # (paths.hay_jugador). En la pública se contesta, no se revienta.
+    _DEL_JUGADOR = frozenset({"jugar", "zzz", "control_movil"})
+
+    @staticmethod
+    def _sin_jugador(tool: str) -> str:
+        if tool == "jugar":
+            return ("No juego por ti: casi todos los juegos lo prohíben en sus normas "
+                    "y te podrían cerrar la cuenta. Lo que sí puedo es buscarte guías, "
+                    "trucos o cómo pasar una parte.")
+        if tool == "zzz":
+            return "No tengo guías guardadas de ese juego; pídemelo y lo busco en internet."
+        return "Desde esta versión de Celestia no manejo el móvil."
+
     @staticmethod
     def _no_es_android(tool: str) -> str:
         sistema = {"win32": "Windows", "darwin": "un Mac"}.get(sys.platform, "un ordenador")
@@ -4279,6 +4276,8 @@ class AgentTools:
         fn = dispatch.get(tool)
         if fn is None:
             return f"Herramienta desconocida: {tool}"
+        if tool in self._DEL_JUGADOR and not hay_jugador():
+            return self._sin_jugador(tool)
         if tool in self._EN_UN_PC and not ES_ANDROID:
             # En un ordenador, abrir/cerrar programas y el volumen los hace pc.py
             # (4 oct 2026; antes contestaba «sólo funciona en un móvil»).

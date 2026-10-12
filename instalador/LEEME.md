@@ -14,8 +14,8 @@ Para quien la instala: **descargar, abrir y usar**. Sin instalar Python ni escri
 arrancan, sirven el chat y contestan. Windows se instala en ~30 s y arranca en ~26 s; Mac en
 ~8-22 s; la APK arranca en ~12 s en un emulador de Android.
 
-La APK v1 no maneja el móvil (Shizuku), no juega al ZZZ ni hace calcos de fotos (no hay
-scipy para su Python), y Android la congela al cerrarla. El resto, igual que en el PC.
+La APK v1 no maneja el móvil (Shizuku), y Android la congela al cerrarla. El resto, igual
+que en el PC (los calcos de fotos van con `ndimage_lite.py`, porque no hay scipy para su Python).
 
 Al abrirse sale una ventanita («Celestia está encendida», con *Abrir el chat* y *Apagar*) y el chat en el navegador.
 La primera vez el chat explica cómo sacar una clave gratis de Gemini o Groq: se pega en el chat y ya piensa.
@@ -26,8 +26,8 @@ Reinstalar o actualizar no lo toca. Al desinstalar en Windows se pregunta si bor
 
 ## Qué no hace en un PC
 
-Lo que necesita un móvil Android con Shizuku: abrir apps, llamar, linterna, WiFi, jugar al ZZZ.
-En un PC lo dice en vez de fingirlo. Tampoco lleva modelos locales (torch): piensa con proveedores de la nube.
+Lo que necesita un móvil: llamar, linterna, WiFi. En un PC lo dice en vez de fingirlo; abrir y
+cerrar programas, el volumen y mirar la pantalla sí los hace (`pc.py`). Tampoco lleva modelos locales (torch): piensa con proveedores de la nube.
 
 ## Fabricarlos
 

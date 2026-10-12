@@ -57,5 +57,28 @@ print("✓ primp (el motor del metabuscador) funciona dentro de la app")
 assert isinstance(s["pruebas"]["buscar"], int) and s["pruebas"]["buscar"] > 0, s["pruebas"]
 print("✓ busca con el metabuscador")
 EOF
+
+# Viva con la app cerrada (12 oct 2026): el servicio en primer plano la sostiene,
+# y al reabrirla es la misma Celestia (Android vuelve a ejecutar la app entera).
+adb shell dumpsys activity services "$PAQUETE" > prueba/servicios.txt
+grep -q "ServicioCelestia" prueba/servicios.txt || fallo "el servicio que la mantiene viva no está"
+grep -q "isForeground=true" prueba/servicios.txt || fallo "el servicio no está en primer plano"
+echo "✓ el servicio en primer plano está en marcha"
+PID=$(adb shell pidof "$PAQUETE" | tr -d '\r')
+adb shell settings put global always_finish_activities 1    # al salir, Android destruye el chat
+adb shell input keyevent KEYCODE_HOME
+sleep 20
+curl -sf http://127.0.0.1:8765/estado -o /dev/null || fallo "con la app cerrada, Celestia no contesta"
+[ "$(adb shell pidof "$PAQUETE" | tr -d '\r')" = "$PID" ] || fallo "con la app cerrada, el proceso ha muerto"
+echo "✓ con la app cerrada sigue viva y contesta"
+adb shell monkey -p "$PAQUETE" -c android.intent.category.LAUNCHER 1 >/dev/null || fallo "no se reabre"
+sleep 15
+adb shell settings put global always_finish_activities 0
+[ "$(adb shell pidof "$PAQUETE" | tr -d '\r')" = "$PID" ] || fallo "al reabrirla, el proceso es otro"
+adb logcat -d | grep -q "el servidor ya estaba en marcha" || fallo "al reabrirla no reutilizó su servidor"
+curl -sf http://127.0.0.1:8765/estado -o /dev/null || fallo "al reabrirla, Celestia no contesta"
+adb exec-out screencap -p > prueba/captura_reabierta.png
+echo "✓ al reabrirla, la misma Celestia (sin arrancar otra encima)"
+
 adb logcat -d > prueba/logcat.txt
 echo "✓ la APK funciona"

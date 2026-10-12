@@ -7,6 +7,9 @@ vista web a pantalla completa. Mientras arranca se ve una portada.
 Los datos de la persona (memoria, claves, lo aprendido) van a la carpeta
 privada de la app (`CELESTIA_DATOS`), que sobrevive a las actualizaciones; el
 código se reemplaza entero en cada una.
+
+Al cerrarla sigue viva (servicio.py: una notificación fija «Celestia está
+activa») y despierta al móvil cuando tiene algo que hacer (vigilia.py).
 """
 from __future__ import annotations
 
@@ -99,6 +102,44 @@ def _contesta() -> bool:
         return False
 
 
+# El servidor, uno por proceso. Android vuelve a ejecutar main() cada vez que se
+# abre la app (MainActivity.onCreate), y con el servicio el proceso sigue vivo al
+# cerrarla: sin esto, cada vez que Enzo la reabría se arrancaba otra Celestia
+# encima de la que ya corría (dos hilos de recordatorios, dos de todo).
+_SERVIDOR = {"hilo": None, "error": ""}
+_SERVIDOR_LOCK = threading.Lock()
+SERVICIO = "celestia_movil.servicio.ServicioCelestia"
+
+
+def _arrancar_servidor() -> bool:
+    """Lo arranca si no está corriendo ya. True si lo ha arrancado ahora."""
+    with _SERVIDOR_LOCK:
+        hilo = _SERVIDOR["hilo"]
+        if hilo is not None and hilo.is_alive():
+            print("Celestia: el servidor ya estaba en marcha")   # lo mira probar_apk.sh
+            return False
+        _SERVIDOR["error"] = ""
+        _SERVIDOR["hilo"] = threading.Thread(target=_servidor, daemon=True, name="celestia")
+        _SERVIDOR["hilo"].start()
+        return True
+
+
+def _servidor() -> None:
+    """El `celestia.py` de siempre, como si se lanzara a mano."""
+    error = ""
+    try:
+        sys.argv = ["celestia.py", "--modo", "whatsapp", "--wa-puerto", str(PUERTO)]
+        # Como módulo y no como fichero: dentro de la APK el código no está
+        # en el disco (Chaquopy lo carga del propio paquete), y run_path
+        # fallaba con «can't find '__main__' module».
+        runpy.run_module("celestia_movil.nucleo", run_name="__main__", alter_sys=True)
+    except SystemExit:
+        pass
+    except BaseException:
+        error = traceback.format_exc()
+    _SERVIDOR["error"] = error or "Celestia se ha cerrado."
+
+
 class CelestiaApp(toga.App):
     def startup(self):
         datos = Path(self.paths.data)
@@ -130,12 +171,12 @@ class CelestiaApp(toga.App):
         self._pedir_permiso_avisos()
         self._enganchar_a_celestia()
 
-        self._error = ""
         if not PUERTO:
             self._portada("No he podido arrancar.",
                           "<p>Todos los puertos que uso (8765-8814) están ocupados.</p>")
             return
-        threading.Thread(target=self._servidor, daemon=True, name="celestia").start()
+        self._mantener_viva()               # antes del servidor: sus recordatorios
+        _arrancar_servidor()
         threading.Thread(target=self._esperar, daemon=True, name="espera").start()
 
     # ── Lo propio de Android (por Chaquopy: Java desde Python) ──────────────
@@ -401,13 +442,48 @@ class CelestiaApp(toga.App):
         except Exception as e:
             print(f"Celestia: no pude enganchar avisos/actualización ({e})")
 
+    def _mantener_viva(self) -> None:
+        """Que siga viva con la app cerrada (servicio.py) y que despierte al
+        móvil para sus encargos y recordatorios (vigilia.py)."""
+        try:
+            from .vigilia import poner
+            poner(self._actividad().getApplicationContext())
+        except Exception as e:
+            print(f"Celestia: no despertará para encargos ni recordatorios ({e})")
+        try:
+            from android.content import Intent
+            from java import jclass
+            act = self._actividad()
+            act.startForegroundService(Intent(act, jclass(SERVICIO)))
+        except Exception as e:
+            print(f"Celestia: no seguirá viva con la app cerrada ({e})")
+
+    def _pedir_que_no_la_duerma(self) -> None:
+        """Una vez: que el ahorro de batería de Android (y el del fabricante) la
+        deje en paz. Si Enzo dice que no, no se vuelve a preguntar."""
+        try:
+            from android.content import Context, Intent
+            from android.net import Uri
+            from android.provider import Settings
+            act = self._actividad()
+            marca = Path(self.paths.data) / ".bateria_pedida"
+            energia = act.getSystemService(Context.POWER_SERVICE)
+            if marca.exists() or energia.isIgnoringBatteryOptimizations(act.getPackageName()):
+                return
+            marca.write_text(time.strftime("%Y-%m-%d %H:%M"), encoding="utf-8")
+            act.startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                                     Uri.parse(f"package:{act.getPackageName()}")))
+        except Exception as e:
+            print(f"Celestia: no pude pedir que no la duerma ({e})")
+
     def _avisar(self, titulo: str, texto: str) -> bool:
-        """Una notificación de Android; al tocarla se abre la app."""
+        """Una notificación de Android; al tocarla se abre la app. Con el contexto
+        de la aplicación: con la app cerrada, la actividad ya no está."""
         from android.app import Notification, NotificationChannel, NotificationManager, PendingIntent
         from android.content import Context
         from android.content.pm import PackageManager
         from android.os import Build
-        act = self._actividad()
+        act = self._actividad().getApplicationContext()
         if (Build.VERSION.SDK_INT >= 33 and act.checkSelfPermission(
                 "android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED):
             # Sin permiso Android lo tira sin decir nada: se vuelve a pedir.
@@ -503,37 +579,23 @@ class CelestiaApp(toga.App):
     def _portada(self, mensaje: str, detalle: str = "") -> None:
         self.web.set_content(URL, PORTADA.format(mensaje=mensaje, detalle=detalle))
 
-    def _servidor(self) -> None:
-        """El `celestia.py` de siempre, como si se lanzara a mano."""
-        try:
-            sys.argv = ["celestia.py", "--modo", "whatsapp", "--wa-puerto", str(PUERTO)]
-            # Como módulo y no como fichero: dentro de la APK el código no está
-            # en el disco (Chaquopy lo carga del propio paquete), y run_path
-            # fallaba con «can't find '__main__' module».
-            runpy.run_module("celestia_movil.nucleo", run_name="__main__", alter_sys=True)
-        except SystemExit:
-            pass
-        except BaseException:
-            self._error = traceback.format_exc()
-        if not self._error:
-            self._error = "Celestia se ha cerrado."
-
     def _esperar(self) -> None:
         inicio = time.time()
         while time.time() - inicio < 240:
             if _contesta():
                 self.loop.call_soon_threadsafe(self._abrir_chat)
                 return
-            if self._error:
+            if _SERVIDOR["error"]:
                 break
             time.sleep(1)
-        error = self._error or "Tarda demasiado en arrancar."
+        error = _SERVIDOR["error"] or "Tarda demasiado en arrancar."
         detalle = "<pre>" + error[-3000:].replace("&", "&amp;").replace("<", "&lt;") + "</pre>"
         self.loop.call_soon_threadsafe(
             lambda: self._portada("No he podido arrancar.", detalle))
 
     def _abrir_chat(self) -> None:
         self.web.url = URL + "/chat"
+        self._pedir_que_no_la_duerma()
 
 
 def main():

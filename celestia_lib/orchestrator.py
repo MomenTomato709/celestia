@@ -47,6 +47,7 @@ from .abstraction import AbstractionEngine, Ejemplo, PatternStore
 from . import actividad
 from . import formato
 from . import restriccion_letras
+from . import restricciones
 from .model import ModelWrapper, _MULETILLA_RE, quitar_muletillas
 from .resources import ResourceManager
 
@@ -286,6 +287,7 @@ _PREGUNTA_SOBRE_SI_MISMA_RE = re.compile(
 # cosa —una letra, un asterisco de markdown a medias, dos puntos— es un corte.
 # Mirarlo al revés (listar los finales «malos») deja fuera casos raros: la
 # primera versión se comía el caso real «…¿quién es r*» por acabar en asterisco.
+_ACABA_EN_HASHTAGS_RE = re.compile(r"(?:^|\n)[ \t]*(?:#[\w\u00C0-\u017F]+[ \t,]*){2,}$")
 _FIN_LIMPIO_RE = re.compile(
     r"""[.!?…»”"')\]}]$"""
     r"""|[\U0001F300-\U0001FAFF\u2600-\u27BF\u2764\uFE0F]$""",
@@ -341,7 +343,10 @@ _COMENTA_EL_CONTEXTO_RE = re.compile(
 # una guía práctica»— y eso en un chat de móvil se lee fatal. La regla está en
 # el system prompt, pero un modelo puede ignorarla: esto lo asegura.
 _SEPARADOR_MD_RE = re.compile(r"^\s*([-*_])\1{2,}\s*$", re.M)
-_ENCABEZADO_MD_RE = re.compile(r"^[ \t]*#{1,6}[ \t]*(?:\d+[.)][ \t]*)?(.+?)[ \t]*$", re.M)
+# Detrás de las almohadillas tiene que haber un espacio, como en markdown: si
+# no, «#peluqueriavalladolid #cambiodelook…» (los hashtags de un post) se leía
+# como título, perdía la primera # y acababa en «:» (examen, 7 oct 2026).
+_ENCABEZADO_MD_RE = re.compile(r"^[ \t]*#{1,6}[ \t]+(?:\d+[.)][ \t]*)?(.+?)[ \t]*$", re.M)
 # Se borra la FRASE ENTERA, no sólo el trozo: quitando únicamente «te dejo una
 # guía práctica» quedaba colgando un «Con la información que tengo a mano,».
 _PREAMBULO_DOC_RE = re.compile(
@@ -365,6 +370,22 @@ _PREAMBULO_DOC_RE = re.compile(
 # de un salto.
 _TITULO_SUELTO_RE = re.compile(
     r"(?<=[.!?])[ \t]+([A-ZÁÉÍÓÚÑ][^.!?\n]{2,45}:)[ \t]*(?=\n|[-*•])")
+
+
+_ASUNTO_RE = re.compile(r"^\W{0,3}asunto\W{0,3}\s*:", re.I | re.M)
+_SALUDO_CARTA_RE = re.compile(
+    r"^\W{0,3}(?:estimad[oa]s?|buenos\s+d[ií]as|buenas\s+tardes|a\s+la\s+atenci[oó]n|"
+    r"muy\s+se[ñn]or|querid[oa]s?|hola\s+\w+)\b", re.I | re.M)
+_DESPEDIDA_CARTA_RE = re.compile(
+    r"^\W{0,3}(?:un\s+saludo|atentamente|saludos(?:\s+cordiales)?|un\s+cordial\s+saludo|"
+    r"reciba\s+un\s+cordial|quedo\s+a\s+(?:su|tu)\s+disposici[oó]n|un\s+abrazo|besos)\b",
+    re.I | re.M)
+
+
+def _es_carta(texto: str) -> bool:
+    """Un correo o una carta para copiar: con asunto, o con saludo y despedida."""
+    return bool(_ASUNTO_RE.search(texto or "")) or bool(
+        _SALUDO_CARTA_RE.search(texto or "") and _DESPEDIDA_CARTA_RE.search(texto or ""))
 
 
 def _estilo_chat(texto: str) -> str:
@@ -401,12 +422,16 @@ def _estilo_chat(texto: str) -> str:
 
     limpio = _ENCABEZADO_MD_RE.sub(_titulo, limpio)
     limpio = _PREAMBULO_DOC_RE.sub(" ", limpio)
-    limpio = _TITULO_SUELTO_RE.sub(r"\n\n\1\n", limpio)
-    # Un título seguido de línea en blanco y su párrafo: se pegan.
-    # …salvo si lo que viene debajo es un bloque apartado (código): «Claro:
-    # ```python» en la misma línea deja el bloque sin abrir en su renglón.
-    limpio = re.sub(r"(^|\n)([^\n]{3,60}:)\n{2,}(?=[^\s\-*•\d\x00])",
-                    r"\1\2 ", limpio)
+    # Un correo o una carta se copian tal cual: «Buenos días:» y «les solicito:» no son
+    # títulos que pegar al párrafo (juez del examen, 11 oct 2026: «las solicitudes
+    # apelotonadas, sin saltos de línea»).
+    if not _es_carta(limpio):
+        limpio = _TITULO_SUELTO_RE.sub(r"\n\n\1\n", limpio)
+        # Un título seguido de línea en blanco y su párrafo: se pegan.
+        # …salvo si lo que viene debajo es un bloque apartado (código): «Claro:
+        # ```python» en la misma línea deja el bloque sin abrir en su renglón.
+        limpio = re.sub(r"(^|\n)([^\n]{3,60}:)\n{2,}(?=[^\s\-*•\d\x00])",
+                        r"\1\2 ", limpio)
     limpio = re.sub(r"[ \t]{2,}", " ", limpio)
     limpio = re.sub(r"\n{3,}", "\n\n", limpio)
     return formato.restaurar(limpio.strip(), _intocable)
@@ -700,7 +725,9 @@ def _cerrar_en_frase_completa(texto: str) -> str:
     t = texto.rstrip()
     if _ACABA_EN_BLOQUE_RE.search(t):
         return formato.restaurar(texto, _bloques)
-    if len(t) < 200 or _ACABA_EN_URL_RE.search(t):
+    if len(t) < 200 or _ACABA_EN_URL_RE.search(t) or _ACABA_EN_HASHTAGS_RE.search(t):
+        # Los hashtags del post no llevan punto y no están cortados (examen, 11 oct
+        # 2026: el guion de TikTok perdió sus cinco hashtags aquí).
         return formato.restaurar(texto, _bloques)
     if _FIN_LIMPIO_RE.search(t) and not _PUNTOS_TRAS_PALABRA_CORTADA_RE.search(t):
         return formato.restaurar(texto, _bloques)
@@ -1853,7 +1880,10 @@ class Orchestrator:
         # adverbio temporal y aun así caducan en semanas: en este terreno el
         # conocimiento del modelo SIEMPRE está viejo, así que se busca.
         r"\b(?:chatgpt|openai|anthropic|claude|gemini|copilot|deepseek|qwen|"
-        r"mistral|grok|llama|perplexity|midjourney|sora|stable\s+diffusion|"
+        # «llama» sin «se/me/te/le/lo/la» delante: «una perra que se llama Lola»
+        # mandaba a internet (examen de nivel, 7 oct 2026).
+        r"mistral|grok|(?<!\bse\s)(?<!\bme\s)(?<!\bte\s)(?<!\ble\s)(?<!\blo\s)(?<!\bla\s)llama|"
+        r"perplexity|midjourney|sora|stable\s+diffusion|"
         r"hugging\s*face|nvidia|groq|cerebras|openrouter)\b|"
         r"\b(?:modelos?|ia|inteligencia\s+artificial|llms?)\s+"
         r"(?:de\s+\w+|m[aá]s\s+\w+|actual\w*|nuev\w+|disponibles?)\b|"
@@ -2044,6 +2074,33 @@ class Orchestrator:
         r"^\s*[¿¡]*\s*(?:a\s+)?cu[aá]ntos?\s+estamos\b",
         re.IGNORECASE,
     )
+    _PIDE_RECLAMACION_RE = re.compile(
+        r"\b(?:reclama(?:r|ci[oó]n)|queja|hoja\s+de\s+reclamaciones)\b.{0,200}?"
+        r"\b(?:correo|e-?mail|carta|escrito|mensaje|formulario)\b|"
+        r"\b(?:correo|e-?mail|carta|escrito)\s+(?:de|para)\s+(?:reclama(?:r|ci[oó]n)|queja)\b",
+        re.IGNORECASE | re.DOTALL)
+    _REDES_RE = re.compile(r"\b(?:tik\s?tok|reels?|instagram|shorts|youtube)\b", re.IGNORECASE)
+    _NEGOCIO_RE = re.compile(
+        r"\bmi\s+(?:peluquer[ií]a|barber[ií]a|tienda|negocio|restaurante|bar|cafeter[ií]a|"
+        r"empresa|marca|cl[ií]nica|gimnasio|academia|taller|panader[ií]a|hotel|estudio|"
+        r"floristeria|florister[ií]a|centro)\b|\bpara\s+(?:mi|el|nuestro)\s+negocio\b",
+        re.IGNORECASE)
+    _PIDE_PRESUPUESTO_RE = re.compile(
+        r"\b(?:presupuesto|tenemos|tengo|disponemos\s+de|nos\s+gastamos)\b[^.?!\n]{0,40}?"
+        r"\d+\s*(?:€|euros)|"
+        r"\bd[ií]me\s+(?:m[aá]s\s+o\s+menos\s+)?cu[aá]nto\s+(?:sale|cuesta|costar[ií]a)\s+"
+        r"(?:todo|en\s+total|el\s+total)",
+        re.IGNORECASE)
+    _PIDE_UN_TEXTO_RE = re.compile(
+        r"\b(?:escr[ií]be(?:me|le|nos)?|red[aá]cta(?:me|le)?|prep[aá]rame|hazme|dame|"
+        r"organ[ií]zame|plan[eé]ame|monta(?:me)?)\b.{0,60}?"
+        r"\b(?:correo|e-?mail|carta|mensaje|reclamaci[oó]n|guion|gui[oó]n|post|discurso|"
+        r"cuento|art[ií]culo|texto|felicitaci[oó]n|presentaci[oó]n|curr[ií]culum|cv|"
+        # Lo que sale con lista detrás: el menú de la semana del examen (7 oct
+        # 2026) llegó cortado en la lista de la compra.
+        r"men[uú]s?|cenas|comidas|lista\s+de\s+la\s+compra|plan|rutina|itinerario|"
+        r"recetas?|horario)\b",
+        re.IGNORECASE)
     _ADV_TEMPORAL_SUELTO_RE = re.compile(
         r"\b(?:hoy|ayer|ahora\s+mismo|actualmente|[uú]ltimamente|"
         r"esta\s+semana|este\s+mes)\b",
@@ -2055,9 +2112,15 @@ class Orchestrator:
     # Son texto del sistema, no del usuario: mezclarlos con lo que él escribió
     # falseaba la detección de idioma (sesión 42: pregunta en español +
     # resultado de buscar_web en inglés → Celestia contestaba en inglés).
+    # Los hechos del usuario que van en cada turno (ver respond).
+    _MAX_CHARS_HECHOS = 1_200
+    _MAX_CHARS_HECHO = 200
+
+    # El documento adjunto también (documento_abierto.py): sin esto, «¿cuánto cuesta
+    # la cuota de la piscina?» con el reglamento delante se iba a buscar a internet.
     _BLOQUE_ANEXADO_RE = re.compile(
         r"\n\n\[(?:RESULTADO|IMAGEN|CAPTURA|PANTALLA|ESTADO\s+INTERNO|"
-        r"Informaci[oó]n\s+actualizada)",
+        r"Informaci[oó]n\s+actualizada|DOCUMENTO\s|CONTENIDO\s+DEL\s+ARCHIVO)",
         re.IGNORECASE,
     )
 
@@ -2086,6 +2149,39 @@ class Orchestrator:
         r"sepe|seguridad\s+social|hacienda|declaraci[oó]n\s+de\s+la\s+renta|"
         r"certificado\s+de\s+empresa|carta\s+de\s+despido|finiquito|"
         r"vida\s+laboral|empadronamiento|cita\s+previa)\b",
+        re.IGNORECASE)
+    # Examen de nivel, 7 oct 2026: 29 de los 50 mensajes de la conversación con
+    # Marta se iban a internet, y entre ellos lo que ella CONTABA («Tengo una
+    # perra beagle que se llama Lola…», «Soy alérgica a los frutos secos…») o lo
+    # que se pregunta a la memoria («…teniendo en cuenta todo lo que sabes de
+    # nosotros»). Con el mensaje tal cual de consulta, el buscador devolvía
+    # plantillas de Canva y la respuesta acababa hablando de ellas.
+    _PREGUNTA_A_LA_MEMORIA_RE = re.compile(
+        # «de mí» suelto, no «de mi pueblo» (eso pregunta por el mundo).
+        r"\bsabes\s+(?:de|sobre|acerca\s+de)\s+(?:nosotr[oa]s\b|"
+        r"m[ií](?=\s*(?:$|[.,;:!?)]|y\b|e\b)))|"
+        r"\bte\s+(?:he|hab[ií]a)\s+(?:contado|dicho|hablado)\b|\bte\s+(?:dije|cont[eé])\b|"
+        r"\b(?:te\s+acuerdas|recuerdas)\s+(?:de\s+)?(?:lo\s+)?que\s+te\b",
+        re.IGNORECASE)
+    _CUENTA_DE_SI_RE = re.compile(
+        r"^\s*(?:(?:hola|oye|bueno|pues|mira|por\s+cierto|ah)\b[\s,.!]*)*(?:yo\s+)?"
+        r"(?:tengo|soy|me\s+llamo|vivo\s+en|trabajo\s+(?:de|como|en)|"
+        r"estoy\s+(?:casad|embarazad|solter|divorciad|jubilad|en\s+paro)|"
+        r"mi\s+(?:novi[oa]|pareja|marido|mujer|herman[oa]|madre|padre|hij[oa]|"
+        r"perr[oa]|gat[oa]|amig[oa]|jef[ea]|abuel[oa]|ti[oa]|prim[oa]|suegr[oa]|"
+        r"cu[ñn]ad[oa]|compa[ñn]er[oa]|vecin[oa])\s+(?:se\s+llama|es|est[aá]|vive|"
+        r"trabaja|tiene))",
+        re.IGNORECASE)
+    # Lo que convierte ese «tengo / soy» en una petición: entonces sí se mira
+    # si hay que buscar. Las interrogativas, sólo con tilde: sin ella, «que» y
+    # «como» son de lo más corriente en una frase que sólo cuenta algo.
+    _PIDE_ALGO_RE = re.compile(
+        r"[?¿]|\b(?:recomi[eé]ndame|d[ií]me|dame|hazme|b[uú]sca\w*|expl[ií]came|"
+        r"cu[eé]ntame|prep[aá]rame|escr[ií]beme|ay[uú]dame|necesito\s+que|"
+        r"quiero\s+(?:que|saber)|me\s+gustar[ií]a\s+saber|puedes|podr[ií]as|"
+        r"duda|pregunta|curiosidad|qué|cuánt[oa]s?|cómo|dónde|cuándo|quién|cuál|"
+        # «Tengo entendido que ha salido…» cuenta algo del mundo, no de sí.
+        r"entendido|le[ií]do|o[ií]do|dicen\s+que|han\s+dicho)\b",
         re.IGNORECASE)
     # Corregir o seguir la pregunta anterior cuando esa sí buscó: «Nono tipo
     # para tener mi sitio web sabes», «Y los go karts?», «Pero asi se llaman?».
@@ -2148,6 +2244,12 @@ class Orchestrator:
                 logger.info("Corrige o sigue un tema que acaba de buscarse — "
                             "se busca otra vez")
                 return True
+        if self._PREGUNTA_A_LA_MEMORIA_RE.search(query):
+            logger.info("Pregunta por lo que ya sabe de la persona — sin búsqueda")
+            return False
+        if self._CUENTA_DE_SI_RE.search(query) and not self._PIDE_ALGO_RE.search(query):
+            logger.info("La persona cuenta algo de sí — sin búsqueda")
+            return False
         # Sesión 53 — el mensaje habla de ELLA o del hilo, no del mundo. Se
         # quita lo que la señala (y los adverbios temporales, que por sí solos
         # disparan el trigger «hoy») y se mira si queda un tema de verdad:
@@ -2319,19 +2421,23 @@ class Orchestrator:
                         hilo, len(self.conv_history))
         return hilo
 
-    def anotar_turno(self, user_input: str, respuesta: str) -> None:
+    def anotar_turno(self, user_input: str, respuesta: str,
+                     hilo: Optional[str] = None) -> None:
         """Apunta en el hilo activo un turno que se resolvió sin el modelo.
 
         Sin esto, lo que se contesta por un atajo (una foto pasada a líneas) no
         existe para el siguiente mensaje: «¿y más gruesas?» no sabría de qué
-        se habla.
+        se habla. Con `hilo`, en ese chat aunque ahora esté abierto otro (un
+        encargo que acaba en segundo plano).
         """
-        hilo = self.hilo_actual
-        self.conv_history.append({"role": "user", "content": user_input})
-        self.conv_history.append({"role": "assistant", "content": respuesta})
+        hilo = (hilo or self.hilo_actual)[:64]
+        historial = (self.conv_history if hilo == self.hilo_actual
+                     else self._hilos.setdefault(hilo, []))
+        historial.append({"role": "user", "content": user_input})
+        historial.append({"role": "assistant", "content": respuesta})
         max_hist = self.config.CONV_HISTORY_TURNS * 2
-        if len(self.conv_history) > max_hist:
-            del self.conv_history[:-max_hist]
+        if len(historial) > max_hist:
+            del historial[:-max_hist]
 
         def _persistir():
             try:
@@ -2621,26 +2727,84 @@ class Orchestrator:
         except Exception:
             pass
 
-        # Inyectar hechos persistentes — TOP-3 relevantes según la query +
+        # Inyectar hechos persistentes — los relevantes según la query +
         # SIEMPRE los hechos de tono/idioma/formato (afectan a toda respuesta).
+        # Examen de nivel (5 oct 2026): con sólo los TRES que compartían palabras
+        # con la pregunta, a una alérgica a los frutos secos le recomendó turrón de
+        # almendra («turrón» no comparte nada con «alergia: frutos secos») y a quien
+        # vive en Valladolid le preguntó desde qué ciudad salía. Ahora van todos si
+        # son pocos, y las alergias y dietas siempre.
+        _restricciones: list = []
+        # La nota de alergias también va pegada al mensaje del turno: con los
+        # resultados de internet delante («menciona sus datos»), la del system se
+        # perdía y el turrón salió de tiendas, Oreo incluido (examen, 7 oct 2026).
+        comida_hint = ""
+        # Con un presupuesto delante, el coste se desglosa: el menú del examen (7 oct
+        # 2026) dio «sobre 32-36 €» sin un solo precio y el juez se lo restó.
+        pistas_del_turno = (
+            "\n\n[Hay un presupuesto: desglosa el coste por partida (cada cosa con su "
+            "precio aproximado), súmalo, compáralo con lo que tiene y di que son precios "
+            "orientativos.]"
+            if self._PIDE_PRESUPUESTO_RE.search(self._solo_mensaje_usuario(user_input or ""))
+            else "")
+        # Contenido de redes para un negocio: la música de moda no tiene licencia comercial
+        # (el rival del examen lo avisó en el guion de TikTok, y Celestia dijo «audio en
+        # tendencia», 7 oct 2026).
+        _msg = self._solo_mensaje_usuario(user_input or "")
+        # Juez del examen (reclamación, 11 oct 2026): «no pide expresamente el número de
+        # referencia de la reclamación»; y «la foto la remito si hace falta» en vez de
+        # adjuntarla.
+        if self._PIDE_RECLAMACION_RE.search(_msg):
+            pistas_del_turno += (
+                "\n\n[Una reclamación que funciona: datos del contrato o del pedido, los "
+                "hechos con sus cifras, lo que pide en una lista, los documentos que ADJUNTA "
+                "(«adjunto…»), un plazo de respuesta concreto (por ejemplo, un mes), que le "
+                "confirmen la recepción con un número de referencia, y adónde irá si no "
+                "contestan. Lo que le tienen que devolver, si depende de una tarifa que no "
+                "conoces, no lo cifres: que lo calculen al rectificar.]")
+        if self._REDES_RE.search(_msg) and self._NEGOCIO_RE.search(_msg):
+            pistas_del_turno += (
+                "\n\n[Es para la cuenta de un negocio: la música, de la biblioteca comercial "
+                "de la plataforma (la Biblioteca de Música Comercial de TikTok, el audio para "
+                "empresas de Instagram), porque las canciones de moda no tienen licencia para "
+                "uso comercial; dilo. Y que acabe con una llamada a la acción clara.]")
         try:
             hechos = self.memory.hechos_usuario()
+            _restricciones = restricciones.de_hechos(hechos or [])
+            # Y las que se cuentan en este mismo mensaje (aún no son hechos guardados).
+            _ya = {(r.quien, r.que) for r in _restricciones}
+            _restricciones += [r for r in restricciones.del_mensaje(
+                self._solo_mensaje_usuario(user_input or "")) if (r.quien, r.que) not in _ya]
             if hechos:
                 # Particionar: tono/formato/idioma → siempre; resto → ranking
                 _TONO_KEYS = ("tono", "formato", "idioma", "saludo", "estilo",
                               "personalidad", "voz", "voice")
                 hechos_tono = [h for h in hechos
                                if any(k in (h.get("clave") or "").lower() for k in _TONO_KEYS)]
-                resto = [h for h in hechos if h not in hechos_tono]
+                resto = [h for h in hechos if h not in hechos_tono
+                         and not hecho_es_ruido(str(h.get("tipo") or ""),
+                                                str(h.get("clave") or ""),
+                                                str(h.get("valor") or ""))]
+                _seguridad = [h for h in resto if re.search(
+                    r"alerg|intoleran|celiac|dieta|vegetarian|vegan",
+                    f"{h.get('clave','')} {h.get('valor','')}", re.I)]
+                resto = [h for h in resto if h not in _seguridad]
                 # Ranking simple por solapamiento de palabras con la query
                 q_palabras = set(re.findall(r"\b\w{4,}\b", user_input.lower()))
                 def _score(h):
                     txt = f"{h.get('clave','')} {h.get('valor','')}".lower()
                     return sum(1 for p in q_palabras if p in txt)
                 resto.sort(key=_score, reverse=True)
-                top_resto = resto[:3]
-                if top_resto:
-                    lineas = [f"- {h['clave']}: {h['valor']}" for h in top_resto]
+                # Por caracteres y no por número (revisión, 6 oct): doce hechos de 500
+                # caracteres eran 2.000 tokens en cada turno. Las alergias, siempre.
+                lineas, _usado = [], 0
+                for h in _seguridad + resto:
+                    linea = f"- {h['clave']}: {str(h['valor'])[:self._MAX_CHARS_HECHO]}"
+                    if h not in _seguridad and _usado + len(linea) > self._MAX_CHARS_HECHOS:
+                        break
+                    lineas.append(linea)
+                    _usado += len(linea)
+                if lineas:
                     # Sesión 32 (BUG-S102): regla ANTI-INVENCIÓN. El LLM Groq
                     # alucinaba «trabajas en hostelería» pese a tener
                     # profesion=farmacéutica. Forzar uso exclusivo de estos
@@ -2659,6 +2823,12 @@ class Orchestrator:
                         "\n\nTONO Y FORMATO (DEBES RESPETARLO SIEMPRE):\n"
                         + "\n".join(lineas_tono)
                     )
+            _pregunta_comida = self._solo_mensaje_usuario(user_input or "")
+            if _restricciones and restricciones.habla_de_comer(_pregunta_comida):
+                _nota_comida = restricciones.nota(_restricciones, _pregunta_comida)
+                if _nota_comida:
+                    system += "\n\n" + _nota_comida
+                    comida_hint = "\n\n" + _nota_comida
         except Exception:
             pass
 
@@ -2959,13 +3129,19 @@ class Orchestrator:
                 f"Y al revés: si nombras empresas, sitios, personas o productos, "
                 f"que sean SOLO los que aparecen en ese bloque; si no trae "
                 f"nombres concretos, dilo claro en vez de inventártelos. "
+                # Examen de nivel, 7 oct 2026: «el bloque que me ha llegado solo trae
+                # plantillas de Canva…», «lo que me ha devuelto la búsqueda no sirve»:
+                # contar la fontanería le restó nota. Si no sirve, no se usa y ya.
+                f"Si lo de internet no sirve para lo que te piden (un menú, una receta, "
+                f"un consejo), ignóralo sin decirlo y contesta con lo que sabes: nunca "
+                f"hables de «la búsqueda», «el bloque» ni «lo que me ha llegado». "
                 # Sesión 41 (bug francés): el texto de internet puede venir en otro
                 # idioma (francés/inglés…) y el modelo a veces lo IMITA. Recordatorio
                 # explícito y pegado (recency) de responder en el idioma del usuario.
                 f"AVISO: el texto de arriba puede estar en otro idioma; tradúcelo si "
                 f"hace falta y responde SIEMPRE en el idioma del usuario, NUNCA copies "
                 f"el idioma del texto de internet."
-                f"{idioma_hint}{emocion_hint}{queja_hint}"
+                f"{idioma_hint}{emocion_hint}{queja_hint}{comida_hint}{pistas_del_turno}"
             )
         elif self._BLOQUE_ANEXADO_RE.search(user_input or ""):
             # El canal ya anexó un [RESULTADO] de herramienta. Puede venir en
@@ -2975,10 +3151,11 @@ class Orchestrator:
                 user_input
                 + "\nEse bloque puede estar en otro idioma: tradúcelo si hace "
                   "falta y responde SIEMPRE en el idioma del usuario."
-                + idioma_hint + emocion_hint + queja_hint
+                + idioma_hint + emocion_hint + queja_hint + comida_hint + pistas_del_turno
             )
         else:
-            augmented_input = user_input + idioma_hint + emocion_hint + queja_hint
+            augmented_input = (user_input + idioma_hint + emocion_hint + queja_hint
+                               + comida_hint + pistas_del_turno)
         messages.append({"role": "user", "content": augmented_input})
 
         # Protección de contexto: si el prompt es muy largo, recortar historial
@@ -3002,6 +3179,11 @@ class Orchestrator:
                 r"con\s+(?:un\s+)?ejemplos?|paso\s+a\s+paso|en\s+detalle|"
                 r"detalladamente|a\s+fondo|lo\s+m[aá]s\s+completo)",
                 _pregunta, re.IGNORECASE):
+            max_tokens = max(self.config.GEN_MAX_TOKENS, 1400)
+        elif max_tokens is None and self._PIDE_UN_TEXTO_RE.search(_pregunta):
+            # Un correo, una carta o un guion enteros no caben en los 512 de charla, y
+            # un modelo que piensa (MiMo) se come parte antes de escribir: la
+            # reclamación del examen (7 oct 2026) se cortó a mitad del asunto.
             max_tokens = max(self.config.GEN_MAX_TOKENS, 1400)
         elif max_tokens is None and re.search(
                 r"\b(?:listado|ideas|opciones|alternativas|pasos|diferencias|"
@@ -3445,6 +3627,39 @@ class Orchestrator:
                         response = _otra
                 except Exception as e:
                     logger.debug("Regeneración por títulos inventados falló: %s", e)
+        # Alergias: lo que se le ha colado (almendra, praliné…) se rehace UNA vez
+        # nombrándoselo; si aun así sigue, se avisa al final en vez de callarlo.
+        # Es lo único que puede hacer daño de verdad (examen de nivel, 5 oct 2026).
+        if response and _restricciones:
+            _malas = restricciones.incumple(response, _restricciones)
+            if _malas:
+                _de_quien = "; ".join(r.texto for r in _restricciones if r.mia and not r.dieta)
+                logger.warning("Recomendaba algo que no puede comer (%s) → rehaciendo",
+                               ", ".join(_malas))
+                try:
+                    _otra = (self.model.generate_from_messages(
+                        list(messages) + [{"role": "system", "content": (
+                            f"Ojo: en tu respuesta salía {', '.join(_malas)}, y {_de_quien}. "
+                            "Vuelve a contestar sin nada que lo lleve; si lo que pide lo "
+                            "lleva siempre, propón una alternativa que no lo lleve y dilo.")}],
+                        max_new_tokens=max_tokens, temperature=0.3, top_p=0.9,
+                        stream=False) or "").strip()
+                except Exception as e:
+                    logger.debug("Regeneración por alergia falló: %s", e)
+                    _otra = ""
+                if _otra and not restricciones.incumple(_otra, _restricciones):
+                    response = _otra
+                    _visto = f"\n\n(Corrijo: llevaba {', '.join(_malas)}.)\n{_otra}"
+                else:
+                    _alergias = ", ".join(r.que for r in _restricciones if r.mia and not r.dieta)
+                    _aviso = (f"⚠️ Ojo: lo que lleve {', '.join(_malas)} descártalo, que me "
+                              f"dijiste que tienes alergia a {_alergias}.")
+                    response = f"{response}\n\n{_aviso}"
+                    _visto = f"\n\n{_aviso}"
+                # En directo (la terminal) ya se imprimió la primera versión: que se vea
+                # la corrección, no sólo en el historial (revisión, 6 oct).
+                if stream:
+                    print(_visto, flush=True)
         # Una orden de herramienta escrita como texto ({"consulta": …}) no es
         # una respuesta: llegó así al chat el 25 sep 2026. El blueprint, al ver
         # esta frase, intenta hacerlo de verdad con el empeño.
@@ -3453,8 +3668,13 @@ class Orchestrator:
             logger.warning("Respuesta que era una orden cruda — no se da por buena: %.80s",
                            response)
             response = _empeno.RESPUESTA_TRABADA
-        # También si el dato llegó como [RESULTADO] (el «empeño» busca así).
-        _con_fuente = bool(web_context or self._BLOQUE_ANEXADO_RE.search(user_input or ""))
+        # También si el dato llegó como [RESULTADO] (el «empeño» busca así). Un
+        # documento adjunto no: si no, el seguimiento («¿y cuándo es la junta?»)
+        # se iba a buscar a internet en vez de mirar el documento.
+        _anexo = self._BLOQUE_ANEXADO_RE.search(user_input or "")
+        _con_fuente = bool(web_context or (
+            _anexo and not re.match(r"\n\n\[(?:DOCUMENTO\s|CONTENIDO\s+DEL\s+ARCHIVO)",
+                                    user_input[_anexo.start():], re.I)))
         _hist.append({"role": "assistant", "content": response,
                       **({"web": True} if _con_fuente else {})})
         max_hist = self.config.CONV_HISTORY_TURNS * 2

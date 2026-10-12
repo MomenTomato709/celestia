@@ -533,7 +533,9 @@ def _cola_log(log_path: Path, limite: int = 8000) -> str:
             crudo = f.read()
     except OSError:
         return ""
-    return crudo.decode("utf-8", errors="replace")
+    # En Windows los puentes escriben «\r\n»: fuera, para que los patrones de
+    # _diagnosticar vean las mismas líneas que en el móvil.
+    return crudo.decode("utf-8", errors="replace").replace("\r\n", "\n")
 
 
 def _diagnosticar(log_path: Path) -> Optional[str]:

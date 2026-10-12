@@ -43,6 +43,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable, List, Optional, Sequence, Tuple
 
+from . import trabajo
 from .gasto import PRECIOS_DEEPSEEK, PresupuestoMensual, coste_uso
 
 logger = logging.getLogger("celestia_v1")
@@ -318,9 +319,14 @@ class Obra:
     # ── Los tests, pasados por la obra ─────────────────────────────────
     def pasar_tests(self) -> Tuple[bool, Optional[int], str]:
         """(en verde, tests que pasan o None si no se sabe contar, cola de la salida)."""
+        # Sin caché de bytecode del proyecto: Aider reescribe un fichero en el mismo
+        # segundo y con el mismo tamaño («a - b» → «a + b») y Python daba por bueno
+        # el .pyc viejo, así que los tests corrían el código de ANTES (5 oct 2026).
+        entorno = {**entorno_sin_secretos(), "PYTHONDONTWRITEBYTECODE": "1",
+                   "PYTHONPYCACHEPREFIX": str(self.carpeta / ".aider.obra.sin_cache")}
         try:
             r = subprocess.run(shlex.split(self.test_cmd), cwd=self.carpeta, capture_output=True,
-                               text=True, timeout=self.timeout_tests_s, env=entorno_sin_secretos())
+                               text=True, timeout=self.timeout_tests_s, env=entorno)
         except subprocess.TimeoutExpired:
             return False, None, f"los tests no acabaron en {self.timeout_tests_s:.0f} s"
         except OSError as e:
@@ -554,6 +560,8 @@ class Obra:
 
     def hacer_tarea(self, n: int, tarea: str) -> Resultado:
         res = Resultado(n=n, tarea=tarea)
+        t = trabajo.actual()
+        t.paso(f"Tarea {n}: {tarea.strip().splitlines()[0][:80]}")
         t0 = time.time()
         base = _git(self.carpeta, "rev-parse", "HEAD").strip()
         _, res.tests_antes, _ = self.pasar_tests()
@@ -606,7 +614,11 @@ class Obra:
                     verde = False
                     cola = (f"Antes pasaban {res.tests_antes} tests y ahora {pasan}: "
                             "no se pueden borrar ni saltar tests.\n" + cola)
+                t.comprobacion("Las pruebas", verde,
+                               motivo="" if verde else f"pasan {pasan}" if pasan is not None else "no pasan",
+                               detalle=cola)
                 if not verde:
+                    t.correccion("Le pido a Aider que lo arregle sin tocar las pruebas")
                     res.motivo = "los tests no pasan"
                     mensaje = (f"La tarea no está terminada: los tests no pasan.\n\n{cola}\n\n"
                                f"Arréglalo sin borrar ni debilitar tests.\n\nLa tarea era:\n{tarea}\n\n{REGLAS}")
@@ -614,6 +626,8 @@ class Obra:
                 graves = self.revisor(tarea, self._diff_de_la_tarea(base))
                 res.revisada = graves is not None
                 res.graves = graves or []
+                t.comprobacion("La revisión", None if graves is None else not res.graves,
+                               motivo="; ".join(res.graves)[:300])
                 if res.graves:
                     res.motivo = "la revisión encontró problemas graves"
                     lista = "\n".join(f"- {g}" for g in res.graves)
@@ -641,6 +655,7 @@ class Obra:
                 primera = tarea.strip().splitlines()[0][:70]
                 res.commit = self._commit(f"Tarea {n}: {primera}")
             else:
+                t.correccion(f"Deshago la tarea {n}: {res.motivo}")
                 self._deshacer(base)
         except Exception:
             # Un fallo inesperado no puede dejar el repo a medias.
@@ -664,10 +679,37 @@ class Obra:
 
     # ── La obra entera ─────────────────────────────────────────────────
     def ejecutar(self, tareas: Sequence[str]) -> List[Resultado]:
+        """La obra se lanza en su propio proceso (scripts/obra_*.py): si nadie
+        le ha abierto cuaderno, se abre uno aquí, para poder mirarla desde el
+        chat con /chat?seguir=ultimo. Sin carpeta: es un repo de verdad y la
+        vista previa serviría su .env."""
+        if trabajo.actual().abierto:
+            return self._ejecutar(tareas)
+        t = trabajo.abrir(f"Obra: {self.carpeta.name}")
+        t.plan([f"Tarea {n}: {tarea.strip().splitlines()[0][:60]}"
+                for n, tarea in enumerate(tareas, 1)])
+        try:
+            with trabajo.en(t):
+                resultados = self._ejecutar(tareas)
+        except BaseException as e:
+            t.terminar(f"Falló: {e}", ok=False)
+            raise
+        hechas = sum(r.aceptada for r in resultados)
+        resumen = f"{hechas} de {len(tareas)} tareas aceptadas"
+        if hechas < len(tareas) and t.parar_pedido():
+            t.terminar(resumen, ok=False, parado=True)
+        else:
+            t.terminar(resumen, ok=hechas == len(tareas))
+        return resultados
+
+    def _ejecutar(self, tareas: Sequence[str]) -> List[Resultado]:
         self._preparar_repo()
         saldo0 = self.saldo(self.clave)
         resultados: List[Resultado] = []
         for n, tarea in enumerate(tareas, 1):
+            if trabajo.actual().parar_pedido():
+                break                                # «Parar» en el panel: entre tareas
+            trabajo.actual().etapa(n - 1)
             self.aviso(f"tarea {n}/{len(tareas)}: {tarea.splitlines()[0][:80]}")
             res = self.hacer_tarea(n, tarea)
             resultados.append(res)

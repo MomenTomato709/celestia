@@ -38,6 +38,7 @@ from . import __version__
 from . import acertijos
 from . import bandeja
 from . import formato
+from . import trabajo
 from .agent import (
     AgentPlanner, AgenteAutonomo, MemoriaPatronesUI,
     _parsear_formato_y_tema,
@@ -57,7 +58,7 @@ from .orchestrator import (
     MetricsLogger, SnapshotManager,
 )
 from .paths import (DOCUMENTOS_DIR, ES_ANDROID, MEM_DIR, PROYECTOS_DIR, PUENTE_URL,
-                    ROOT, SKILLS_DIR)
+                    ROOT, SIN_VENTANA, SKILLS_DIR, entorno_de_scripts, python_de_scripts)
 from .profile import OnboardingFlow, PerfilUsuario
 from .reminders import ReminderManager
 from .resources import PLATAFORMA, ResourceManager
@@ -85,6 +86,99 @@ def _int_seguro(valor, default: int = 0) -> int:
         return int(valor)
     except (ValueError, TypeError):
         return default
+
+
+# ── Lo que se cuenta de la familia (_EXTRACT_SINCRONO) ─────────────────────
+_COLA_FAMILIA = (r"(?:\s*,?\s+((?:es|vive|trabaja|tiene|no\s+come|come|se\s+dedica)\b"
+                 r"(?:(?!,\s*(?:y|pero|as[ií]\s+que)\b|\s+y\s+mi\b)[^.;!?\n]){2,80}))?")
+
+
+def _patron_familia(rel: str) -> "re.Pattern":
+    """«mi novio, Andrés, es vegetariano», «mi novia se llama lucía». No «la madre de
+    mi novio, Carmen»: eso es de la madre. El nombre, con mayúscula y el resto en
+    minúscula («MI NOVIO ES MAJO» no es «ES»), salvo tras «se llama»."""
+    return re.compile(
+        rf"(?<!\bde\s)(?<!\bdel\s)\bmi\s+(?:{rel})\s*,?\s+"
+        rf"(?:se\s+llama\s+(?P<llamado>[a-záéíóúñ]+)|"
+        rf"(?P<nombre>(?-i:[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)))\b" + _COLA_FAMILIA, re.I)
+
+
+_DUDA_RE = re.compile(r"[¿?]|\bno\s+s[eé]\s+si\b|^\s*si\b|\bcrees\s+que\b", re.I)
+
+
+def _familiar(m: "re.Match") -> str:
+    """«Andrés (es vegetariano)», o "" si la frase es una pregunta o una duda: «¿crees
+    que mi novio Andrés tiene razón?» no dice nada de Andrés."""
+    texto = m.string
+    ini = max(texto.rfind(c, 0, m.start()) for c in ".!\n") + 1
+    fines = [i for i in (texto.find(c, m.end()) for c in ".!\n") if i >= 0]
+    frase = texto[ini:min(fines) if fines else len(texto)]
+    if _DUDA_RE.search(frase):
+        return ""
+    nombre = (m.group("llamado") or m.group("nombre") or "").capitalize()
+    cola = (m.group(3) or "").strip(" ,")
+    return f"{nombre} ({cola})" if cola else nombre
+
+
+_CIUDADES_ES = (
+    "Madrid", "Barcelona", "Valencia", "Sevilla", "Zaragoza", "Málaga", "Murcia", "Palma",
+    "Bilbao", "Alicante", "Córdoba", "Valladolid", "Vigo", "Gijón", "Granada", "Oviedo",
+    "Vitoria", "Pamplona", "Santander", "San Sebastián", "Salamanca", "Burgos", "León",
+    "Logroño", "Badajoz", "Cáceres", "Albacete", "Almería", "Huelva", "Cádiz", "Jaén",
+    "Toledo", "Ciudad Real", "Cuenca", "Guadalajara", "Segovia", "Ávila", "Soria",
+    "Palencia", "Zamora", "Ourense", "Lugo", "Pontevedra", "A Coruña", "Santiago de Compostela",
+    "Huesca", "Teruel", "Lleida", "Girona", "Tarragona", "Castellón", "Elche", "Cartagena",
+    "Jerez", "Marbella", "Las Palmas", "Santa Cruz de Tenerife", "Melilla", "Ceuta",
+    "Ponferrada", "Getafe", "Alcalá de Henares", "Móstoles", "Leganés", "Fuenlabrada",
+    "Sabadell", "Terrassa", "Badalona", "Hospitalet", "Reus", "Algeciras")
+_CIUDAD_CONOCIDA_RE = re.compile(
+    r"\b(?:soy\s+de|vivo\s+en|resido\s+en)\s+(" + "|".join(
+        re.escape(c).replace("á", "[aá]").replace("é", "[eé]").replace("í", "[ií]")
+        .replace("ó", "[oó]").replace("ú", "[uú]") for c in _CIUDADES_ES) + r")\b", re.I)
+
+
+def _nombre_ciudad(texto: str) -> str:
+    """El nombre bien escrito («valladolid» → «Valladolid»)."""
+    import unicodedata as _u
+    llano = lambda s: "".join(c for c in _u.normalize("NFD", s.lower())
+                              if _u.category(c) != "Mn")
+    return next((c for c in _CIUDADES_ES if llano(c) == llano(texto)), texto.title())
+
+
+def _ciudad_del_lugar(lugar: str) -> str:
+    """«Hospital Clínico de Valladolid» → «Valladolid», si es una ciudad conocida."""
+    m = re.search(r"\bde\s+([\wÁÉÍÓÚÑáéíóúñ ]+)$", lugar or "")
+    if not m:
+        return ""
+    nombre = _nombre_ciudad(m.group(1).strip())
+    return nombre if nombre in _CIUDADES_ES else ""
+
+
+def _ruta_del_plan(base_dir: Path, ruta: Any) -> str:
+    """La ruta de un archivo del plan que hizo el modelo, limpia y con «/», si
+    cae dentro de `base_dir`. Si no, ValueError con el motivo para el cuaderno.
+
+    La pone el modelo: con «../../.env», «C:/x» o barras invertidas escribía
+    fuera de la carpeta del proyecto (revisión final del panel, 5 oct)."""
+    if not isinstance(ruta, str) or not ruta.strip():
+        raise ValueError("ruta vacía")
+    limpia = ruta.strip().replace("\\", "/")
+    if limpia.startswith("/"):
+        raise ValueError("ruta absoluta")
+    if ":" in limpia:  # «C:/x», «C:x» y los flujos ocultos de NTFS («a.txt:oculto»)
+        raise ValueError("lleva «:» (unidad de disco)")
+    partes = [p for p in limpia.split("/") if p not in ("", ".")]
+    if ".." in partes:
+        raise ValueError("sube de carpeta con «..»")
+    if not partes:
+        raise ValueError("ruta vacía")
+    limpia = "/".join(partes)
+    # Lo de arriba no ve enlaces ni nombres reservados de Windows: lo decide el disco.
+    base = base_dir.resolve()
+    destino = (base / limpia).resolve()
+    if destino == base or not destino.is_relative_to(base):
+        raise ValueError("sale de la carpeta del proyecto")
+    return limpia
 
 
 _SHIZUKU_BRIDGE_URL = f"{PUENTE_URL}/shizuku"
@@ -1380,10 +1474,10 @@ class WhatsAppAPI:
         # 1-3 palabras con inicial mayúscula, cortando en preposición,
         # conjunción, puntuación o fin.
         "nombre": [
-            r"\bme\s+llamo\s+([A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑñáéíóú]+(?:\s+[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑñáéíóú]+){0,2})(?:\s+(?:y|pero|porque|tengo|vivo|soy|trabajo|de\s+)\b|[,\.!\?]|$)",
-            r"\bmi\s+nombre\s+(?:es|completo\s+es)\s+([A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑñáéíóú]+(?:\s+[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑñáéíóú]+){0,2})(?:\s+(?:y|pero|porque|tengo|vivo|soy)\b|[,\.!\?]|$)",
-            r"^\s*soy\s+([A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑñáéíóú]+(?:\s+[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑñáéíóú]+){0,2})(?:\s+(?:y|pero|porque|tengo|vivo|trabajo|de)\b|[,\.!\?]|$)",
-            r"^\s*(?:hola|hey|hola[!,]+|buenas?(?:\s+(?:d[ií]as|tardes|noches))?)[,\s]+soy\s+([A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑñáéíóú]+(?:\s+[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑñáéíóú]+){0,2})(?:\s+(?:y|pero|porque|tengo|vivo|trabajo)\b|[,\.!\?]|$)",
+            r"\bme\s+llamo\s+((?-i:[A-ZÁÉÍÓÚÑ])[\wÁÉÍÓÚÑñáéíóú]+(?:\s+(?-i:[A-ZÁÉÍÓÚÑ])[\wÁÉÍÓÚÑñáéíóú]+){0,2})(?:\s+(?:y|pero|porque|tengo|vivo|soy|trabajo|de\s+)\b|[,\.!\?]|$)",
+            r"\bmi\s+nombre\s+(?:es|completo\s+es)\s+((?-i:[A-ZÁÉÍÓÚÑ])[\wÁÉÍÓÚÑñáéíóú]+(?:\s+(?-i:[A-ZÁÉÍÓÚÑ])[\wÁÉÍÓÚÑñáéíóú]+){0,2})(?:\s+(?:y|pero|porque|tengo|vivo|soy)\b|[,\.!\?]|$)",
+            r"^\s*soy\s+((?-i:[A-ZÁÉÍÓÚÑ])[\wÁÉÍÓÚÑñáéíóú]+(?:\s+(?-i:[A-ZÁÉÍÓÚÑ])[\wÁÉÍÓÚÑñáéíóú]+){0,2})(?:\s+(?:y|pero|porque|tengo|vivo|trabajo|de)\b|[,\.!\?]|$)",
+            r"^\s*(?:hola|hey|hola[!,]+|buenas?(?:\s+(?:d[ií]as|tardes|noches))?)[,\s]+soy\s+((?-i:[A-ZÁÉÍÓÚÑ])[\wÁÉÍÓÚÑñáéíóú]+(?:\s+(?-i:[A-ZÁÉÍÓÚÑ])[\wÁÉÍÓÚÑñáéíóú]+){0,2})(?:\s+(?:y|pero|porque|tengo|vivo|trabajo)\b|[,\.!\?]|$)",
         ],
         "mascota": [
             # Sesión 31 (BUG-E): capturar también el nombre. Antes la pieza
@@ -1397,7 +1491,7 @@ class WhatsAppAPI:
             r"chinchilla|iguana|serpiente|mascota)"
             r"[^\.\?!,;]*)",
             # Sesión 31 (BUG-S5/S6): "nuestro/mi gato Pixel" — pareja/familia.
-            r"\b(?:nuestro|nuestra|mi)\s+(gat[oa]\s+[A-ZÁÉÍÓÚÑ]\w+|perr[oa]\s+[A-ZÁÉÍÓÚÑ]\w+|conej[oa]\s+[A-ZÁÉÍÓÚÑ]\w+|hámster\s+[A-ZÁÉÍÓÚÑ]\w+|pájar[oa]\s+[A-ZÁÉÍÓÚÑ]\w+|tortuga\s+[A-ZÁÉÍÓÚÑ]\w+|loro\s+[A-ZÁÉÍÓÚÑ]\w+|pez\s+[A-ZÁÉÍÓÚÑ]\w+)",
+            r"\b(?:nuestro|nuestra|mi)\s+(gat[oa]\s+(?-i:[A-ZÁÉÍÓÚÑ])\w+|perr[oa]\s+(?-i:[A-ZÁÉÍÓÚÑ])\w+|conej[oa]\s+(?-i:[A-ZÁÉÍÓÚÑ])\w+|hámster\s+(?-i:[A-ZÁÉÍÓÚÑ])\w+|pájar[oa]\s+(?-i:[A-ZÁÉÍÓÚÑ])\w+|tortuga\s+(?-i:[A-ZÁÉÍÓÚÑ])\w+|loro\s+(?-i:[A-ZÁÉÍÓÚÑ])\w+|pez\s+(?-i:[A-ZÁÉÍÓÚÑ])\w+)",
         ],
     }
 
@@ -2602,6 +2696,9 @@ class WhatsAppAPI:
         "religiosa", "ateo", "atea", "cristiano", "cristiana",
         "musulmán", "musulman", "musulmana", "judío", "judio",
         "judía", "judia", "budista",
+        # «Soy cliente de Iberdrola» acabó como profesión (examen, 7 oct 2026).
+        "cliente", "clienta", "usuario", "usuaria", "abonado", "abonada",
+        "titular", "socio", "socia", "consumidor", "consumidora", "fan",
         # Sesión 33 (B33-27): frases filosóficas/poéticas que empiezan por
         # «soy» pero no son identidad ni profesión. «soy quien dice ser»,
         # «soy yo», «soy el de antes», «soy más que…».
@@ -2633,13 +2730,13 @@ class WhatsAppAPI:
         # — hasta 3 palabras con inicial mayúscula. Cortar en coma, punto o
         # conjunción/preposición.
         ("nombre",
-         re.compile(r"\bme\s+llamo\s+([A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑñáéíóú]+(?:\s+[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑñáéíóú]+){0,2})(?:\s+(?:y|pero|porque|tengo|vivo|soy|trabajo)\b|[,\.!\?]|$)", re.I),
+         re.compile(r"\bme\s+llamo\s+((?-i:[A-ZÁÉÍÓÚÑ])[\wÁÉÍÓÚÑñáéíóú]+(?:\s+(?-i:[A-ZÁÉÍÓÚÑ])[\wÁÉÍÓÚÑñáéíóú]+){0,2})(?:\s+(?:y|pero|porque|tengo|vivo|soy|trabajo)\b|[,\.!\?]|$)", re.I),
          lambda m: m.group(1).strip()),
         ("nombre",
-         re.compile(r"\bmi\s+nombre\s+(?:es|completo\s+es)\s+([A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑñáéíóú]+(?:\s+[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑñáéíóú]+){0,2})(?:\s+(?:y|pero|porque|tengo|vivo|soy)\b|[,\.!\?]|$)", re.I),
+         re.compile(r"\bmi\s+nombre\s+(?:es|completo\s+es)\s+((?-i:[A-ZÁÉÍÓÚÑ])[\wÁÉÍÓÚÑñáéíóú]+(?:\s+(?-i:[A-ZÁÉÍÓÚÑ])[\wÁÉÍÓÚÑñáéíóú]+){0,2})(?:\s+(?:y|pero|porque|tengo|vivo|soy)\b|[,\.!\?]|$)", re.I),
          lambda m: m.group(1).strip()),
         ("nombre",
-         re.compile(r"^\s*(?:hola|hey|hola[!,]+|buenas?(?:\s+(?:d[ií]as|tardes|noches))?)?[,\s]*soy\s+([A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑñáéíóú]+(?:\s+[A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑñáéíóú]+){0,2})(?:\s+(?:y|pero|porque|tengo|vivo|trabajo|de)\b|[,\.!\?]|$)", re.I),
+         re.compile(r"^\s*(?:hola|hey|hola[!,]+|buenas?(?:\s+(?:d[ií]as|tardes|noches))?)?[,\s]*soy\s+((?-i:[A-ZÁÉÍÓÚÑ])[\wÁÉÍÓÚÑñáéíóú]+(?:\s+(?-i:[A-ZÁÉÍÓÚÑ])[\wÁÉÍÓÚÑñáéíóú]+){0,2})(?:\s+(?:y|pero|porque|tengo|vivo|trabajo|de)\b|[,\.!\?]|$)", re.I),
          lambda m: m.group(1).strip()),
         ("edad",
          re.compile(r"\btengo\s+(\d{1,3})\s+a[nñ]os", re.I),
@@ -2694,7 +2791,7 @@ class WhatsAppAPI:
              r"([a-záéíóúñ][\wáéíóúñ]*"
              r"(?:ista|tor|tora|dor|dora|nte|ente|ero|era|ico|ica|"
              r"[oó]logo|[oó]loga|esa|ado|ada|ano|ana|ina|ona))"
-             r"\s+en\s+[A-ZÁÉÍÓÚÑ]",
+             r"\s+en\s+(?-i:[A-ZÁÉÍÓÚÑ])",
              re.I),
          lambda m: m.group(1).strip()),
         # Sesión 32 (BUG-S157): ciudad tras profesión en frases con comas.
@@ -2705,7 +2802,7 @@ class WhatsAppAPI:
              r"[a-záéíóúñ][\wáéíóúñ]*"
              r"(?:ista|tor|tora|dor|dora|nte|ente|ero|era|ico|ica|"
              r"[oó]logo|[oó]loga|esa|ado|ada|ano|ana|ina|ona)"
-             r"\s+en\s+([A-ZÁÉÍÓÚÑ][a-zA-Záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-zA-Záéíóúñ]+)?)"
+             r"\s+en\s+((?-i:[A-ZÁÉÍÓÚÑ])[a-zA-Záéíóúñ]+(?:\s+(?-i:[A-ZÁÉÍÓÚÑ])[a-zA-Záéíóúñ]+)?)"
              r"(?:\s+(?:y|porque|aunque)\s+|[.\?!,;]|$)",
              re.I),
          lambda m: m.group(1).strip()),
@@ -2729,7 +2826,7 @@ class WhatsAppAPI:
              r"\b(?:soy|trabajo\s+(?:de|como)|me\s+dedico\s+a)\s+"
              r"[a-záéíóúñ][\wáéíóúñ\s]{1,30}?"
              r"\s+en\s+"
-             r"([A-ZÁÉÍÓÚÑ][a-zA-Záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-zA-Záéíóúñ]+)?)"
+             r"((?-i:[A-ZÁÉÍÓÚÑ])[a-zA-Záéíóúñ]+(?:\s+(?-i:[A-ZÁÉÍÓÚÑ])[a-zA-Záéíóúñ]+)?)"
              r"(?:\s+(?:y|porque|aunque)\s+|[.\?!,;]|$)",
              re.I),
          lambda m: m.group(1).strip()),
@@ -2766,7 +2863,7 @@ class WhatsAppAPI:
          re.compile(r"\bmi\s+ciudad\s+es\s+([^\.\?!,;]+?)(?:\s+(?:y|porque)\s+|[.\?!,;]|$)", re.I),
          lambda m: m.group(1).strip()),
         ("ciudad",
-         re.compile(r"\bsoy\s+de\s+([A-ZÁÉÍÓÚÑ][^\.\?!,;]+?)(?:\s+(?:y|en|con|porque)\s+|[.\?!,;]|$)", re.I),
+         re.compile(r"\bsoy\s+de\s+((?-i:[A-ZÁÉÍÓÚÑ])[^\.\?!,;]+?)(?:\s+(?:y|en|con|porque)\s+|[.\?!,;]|$)", re.I),
          lambda m: m.group(1).strip()),
         # Sesión 32 (BUG-S128): antes el regex era `\btengo\s+un[ao]?\s+(.+)`
         # y capturaba CUALQUIER cosa («tengo una reunión mañana a las 10» →
@@ -2783,11 +2880,36 @@ class WhatsAppAPI:
              re.I),
          lambda m: m.group(1).strip()),
         ("mascota",
-         re.compile(r"\b(?:nuestro|nuestra|mi)\s+(gat[oa]|perr[oa]|conej[oa]|h[aá]mster|p[aá]jar[oa]|tortuga|loro|pez)\s+([A-ZÁÉÍÓÚÑ]\w+)", re.I),
+         re.compile(r"\b(?:nuestro|nuestra|mi)\s+(gat[oa]|perr[oa]|conej[oa]|h[aá]mster|p[aá]jar[oa]|tortuga|loro|pez)\s+((?-i:[A-ZÁÉÍÓÚÑ])\w+)", re.I),
          lambda m: f"{m.group(1)} {m.group(2)}"),
-        ("pareja",
-         re.compile(r"\bmi\s+(?:pareja|mujer|esposa|esposo|marido|novio|novia)\s+(?:se\s+llama\s+|es\s+)?([A-ZÁÉÍÓÚÑ]\w+)", re.I),
-         lambda m: m.group(1)),
+        # Examen de nivel (5 oct 2026): «mi novio, Andrés, es vegetariano» (con
+        # comas) no se guardaba, ni «mi hermano Javi vive en Oporto». Ahora el
+        # nombre y lo que se dice de él: «Andrés (es vegetariano)». Revisión (6 oct):
+        # no «la madre de mi novio, Carmen», ni preguntas, ni la frase siguiente.
+        ("pareja", _patron_familia(r"pareja|mujer|esposa|esposo|marido|novio|novia"), _familiar),
+        ("hermano", _patron_familia(r"hermano"), _familiar),
+        ("hermana", _patron_familia(r"hermana"), _familiar),
+        ("madre", _patron_familia(r"madre"), _familiar),
+        ("padre", _patron_familia(r"padre"), _familiar),
+        ("hijo", _patron_familia(r"hijo"), _familiar),
+        ("hija", _patron_familia(r"hija"), _familiar),
+        # «No tengo coche: me muevo en bici y en transporte público».
+        ("transporte",
+         re.compile(r"\bno\s+tengo\s+(coche|carn[eé]t?(?:\s+de\s+conducir)?|moto)\b"
+                    r"(?:[^.;!?\n]{0,12}?\bme\s+muevo\s+([^.;!?\n]{3,60}))?", re.I),
+         lambda m: f"sin {m.group(1)}" + (f"; se mueve {m.group(2).strip()}" if m.group(2) else "")),
+        # «Trabajo de enfermera en el turno de noche del Hospital Clínico de Valladolid».
+        # Revisión (6 oct): «mi trabajo está al lado del Hospital…» no es trabajar ahí.
+        ("trabajo",
+         re.compile(r"(?<!\bmi\s)(?<!\btu\s)(?<!\bsu\s)(?<!\bel\s)(?<!\bde\s)"
+                    r"\b(?:trabajo|curro)\b[^.;!?\n]{0,60}?\b(?:en|del|de\s+la)\s+(?:el\s+|la\s+)?"
+                    r"((?-i:Hospital|Cl[ií]nica|Centro|Colegio|Instituto|Universidad|Ayuntamiento|"
+                    r"Residencia|Farmacia|Banco|Ministerio|Juzgado)\b"
+                    r"(?:(?!\s+(?:y|pero|desde|hace|porque|aunque)\b)[^.,;!?\n]){2,60})", re.I),
+         lambda m: m.group(1).strip()),
+        # «soy de valladolid», «vivo en burgos»: en minúscula sólo si es una ciudad
+        # conocida (con «[A-Z]» de verdad, «soy de letras» ya no se guarda como ciudad).
+        ("ciudad", _CIUDAD_CONOCIDA_RE, lambda m: _nombre_ciudad(m.group(1))),
         ("color_favorito",
          re.compile(r"\bmi\s+color\s+(?:favorito\s+)?es\s+(?:el\s+)?([^\.\?!,;]+?)(?:\s+(?:y|pero|aunque|porque)\s+|[.\?!,;]|$)", re.I),
          lambda m: m.group(1).strip()),
@@ -2812,6 +2934,31 @@ class WhatsAppAPI:
         r"qu[ée]date\s+esto)\b",
         re.I,
     )
+
+    def _hecho_guardado(self, clave: str) -> str:
+        try:
+            for h in self.orch.memory.hechos_usuario() or []:
+                if str(h.get("clave") or "") == clave:
+                    return str(h.get("valor") or "")
+        except Exception:
+            pass
+        return ""
+
+    def _juntar_familiar(self, clave: str, valor: str) -> str:
+        """Lo que hay que guardar de un familiar, sabiendo lo que ya había: "" si lo
+        nuevo no añade nada; los dos detalles juntos si es la misma persona."""
+        viejo = self._hecho_guardado(clave)
+        if not viejo:
+            return valor
+        nombre_v, _, resto_v = viejo.partition(" (")
+        nombre_n, _, resto_n = valor.partition(" (")
+        if nombre_v.strip().lower() != nombre_n.strip().lower():
+            return valor                     # otra persona: manda lo nuevo
+        detalles = [d.strip() for d in (resto_v.rstrip(")") + ";" + resto_n.rstrip(")")).split(";")
+                    if d.strip()]
+        detalles = list(dict.fromkeys(detalles))
+        juntado = f"{nombre_v.strip()} ({'; '.join(detalles)})" if detalles else nombre_v.strip()
+        return "" if juntado == viejo else juntado
 
     def _extraer_hechos_por_regex(self, mensaje: str) -> None:
         """Extracción síncrona por regex — no depende del LLM. Idempotente:
@@ -2888,9 +3035,23 @@ class WhatsAppAPI:
                     # en la lista.
                     if self._es_no_profesion(valor):
                         continue
+                # Lo de la familia no se pisa con menos: «ceno con mi novio Andrés»
+                # no borra «Andrés (es vegetariano)», y dos detalles se juntan
+                # (revisión, 6 oct 2026: se perdía la dieta y con ella el aviso).
+                if clave_canonica in self._CLAVES_DE_QUIEN and clave_canonica not in (
+                        "trabajo", "transporte", "mascota"):
+                    valor = self._juntar_familiar(clave_canonica, valor)
+                    if not valor:
+                        continue
                 self.orch.memory.registrar_hecho_usuario(
                     "dato_personal", clave_canonica, valor
                 )
+                if clave_canonica == "trabajo":
+                    _de_lugar = _ciudad_del_lugar(valor)
+                    if _de_lugar and not self._hecho_guardado("ciudad"):
+                        self.orch.memory.registrar_hecho_usuario(
+                            "dato_personal", "ciudad", _de_lugar)
+                        logger.info("Hecho síncrono [deducido]: ciudad = %s", _de_lugar)
                 # Sesión 39: además, registrar en la memoria personal con
                 # vigencia temporal (única fuente de verdad a futuro). No borra:
                 # si el valor cambia, el histórico se conserva.
@@ -2903,17 +3064,79 @@ class WhatsAppAPI:
             except Exception as e:
                 logger.debug("Extractor regex %s falló: %s", clave_canonica, e)
 
-    def _extraer_hechos_en_background(self, mensaje_usuario: str) -> None:
-        """Tras una conversación, intenta extraer hechos persistentes del mensaje."""
+    _MAX_MENSAJES_HECHOS = 1800      # lo que cabe en una extracción (varios mensajes)
+    _MAX_PENDIENTES_HECHOS = 8
+
+    def _aplazar_hechos(self, mensaje: str, espera: float) -> None:
+        """Guarda el mensaje para la próxima extracción y la deja programada."""
+        lock = self.__dict__.setdefault("_hechos_lock", threading.Lock())
+        with lock:
+            pendientes = self.__dict__.setdefault("_hechos_pendientes", [])
+            if mensaje not in pendientes:
+                pendientes.append(mensaje)
+                del pendientes[:-self._MAX_PENDIENTES_HECHOS]
+            if getattr(self, "_hechos_temporizador", None):
+                return
+            temporizador = threading.Timer(max(1.0, espera) + 0.5, self._extraer_aplazados)
+            temporizador.daemon = True
+            self._hechos_temporizador = temporizador
+        temporizador.start()
+
+    def _espera_proveedor(self) -> float:
+        """Cuánto falta para que se pueda volver a gastar en el proveedor castigado."""
+        cooldowns = getattr(getattr(getattr(self, "orch", None), "model", None),
+                            "_groq_throttled_until", 0) or 0
+        hasta = max(cooldowns.values(), default=0.0) if isinstance(cooldowns, dict) else cooldowns
+        try:
+            return max(0.0, float(hasta) - time.time())
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _extraer_aplazados(self) -> None:
+        lock = self.__dict__.setdefault("_hechos_lock", threading.Lock())
+        espera = self._espera_proveedor()
+        with lock:
+            pendientes = self.__dict__.get("_hechos_pendientes") or []
+            self._hechos_temporizador = None
+            if espera > 0 and pendientes:
+                # Con el proveedor castigado se perdían todos (revisión, 6 oct): a esperar.
+                temporizador = threading.Timer(espera + 1.0, self._extraer_aplazados)
+                temporizador.daemon = True
+                self._hechos_temporizador = temporizador
+                temporizador.start()
+                return
+            self._hechos_pendientes = []
+        if not pendientes:
+            return
+        # Cada mensaje acaba en punto: el filtro de hechos busca la frase de cada uno.
+        juntos = "\n".join(m.rstrip() if m.rstrip()[-1:] in ".!?" else m.rstrip() + "."
+                           for m in pendientes)
+        logger.info("Extracción de hechos aplazada: %d mensajes juntos", len(pendientes))
+        self._hechos_ultimo_ts = 0.0
+        self._extraer_hechos_en_background(juntos[-self._MAX_MENSAJES_HECHOS:],
+                                           mensajes=pendientes)
+
+    def _extraer_hechos_en_background(self, mensaje_usuario: str,
+                                      mensajes: Optional[List[str]] = None) -> None:
+        """Tras una conversación, intenta extraer hechos persistentes del mensaje.
+
+        `mensajes`: los mensajes sueltos cuando van varios juntos (aplazados). Cada
+        hecho tiene que salir de UNO de ellos: con el bloque entero, «enfermera en
+        Oporto» se anclaba con una palabra de cada mensaje (revisión, 6 oct)."""
         if len(mensaje_usuario.split()) < 6:
             return  # mensaje corto → casi nunca contiene hechos relevantes
         if self._TRIVIAL_RE.match(mensaje_usuario):
             return  # saludo/agradecimiento/etc — sin hechos
-        # Throttle: si extrajimos hace <30s, saltarse (ahorra Groq cuota + latencia)
+        # Throttle: como mucho una extracción cada 30 s (ahorra cupo y latencia).
+        # Lo que llega mientras tanto ya no se tira: se junta y se extrae todo de
+        # una vez al acabar la espera. Tirándolo, en una charla rápida se perdían
+        # justo los mensajes con los datos (examen de nivel, 5 oct 2026: «trabajo
+        # de enfermera…», «mi novio, Andrés…», «mi hermano Javi vive en Oporto…»
+        # llegaron con segundos de diferencia y no se guardó ninguno).
         ultimo = getattr(self, "_hechos_ultimo_ts", 0.0)
-        if time.time() - ultimo < self._HECHOS_THROTTLE_SEG:
-            logger.debug("Extracción de hechos throttled (último hace %.1fs)",
-                            time.time() - ultimo)
+        espera = self._HECHOS_THROTTLE_SEG - (time.time() - ultimo)
+        if espera > 0:
+            self._aplazar_hechos(mensaje_usuario, espera)
             return
         # Si Groq está en throttle (429 reciente) para CUALQUIER modelo,
         # no consumir cupo en background. _groq_throttled_until es ahora
@@ -2948,7 +3171,7 @@ class WhatsAppAPI:
             "  - 'a' y 'b' son nombres de entidades. Usa 'usuario' para referirse al usuario.\n"
             "  - Vocabulario sugerido: tio_de, padre_de, madre_de, hermano_de, amigo_de, "
             "pareja_de, vive_en, trabaja_en, estudia_en, tiene, gusta, conoce_a.\n\n"
-            f"MENSAJE DEL USUARIO: «{mensaje_usuario[:600]}»\n\n"
+            f"MENSAJE DEL USUARIO: «{mensaje_usuario[:self._MAX_MENSAJES_HECHOS]}»\n\n"
             "Responde EXCLUSIVAMENTE con JSON (sin markdown):\n"
             "{\n"
             '  "hechos": [{"tipo": "preferencia|dato_personal|instruccion_recurrente", '
@@ -2960,25 +3183,27 @@ class WhatsAppAPI:
             'Si no hay nada digno de recordar, responde: {"hechos": [], "entidades": [], "relaciones": []}'
         )
         try:
-            resp = self._generar_codigo(prompt, max_tokens=300).strip()
+            resp = self._generar_codigo(prompt, max_tokens=600).strip()
             resp = re.sub(r"```json|```", "", resp).strip()
             data = json.loads(resp)
             hechos = data.get("hechos", [])
             if not isinstance(hechos, list):
                 hechos = []
             anotaciones_nuevas: List[str] = []
-            for h in hechos[:5]:
+            for h in hechos[:10]:      # pueden ser varios mensajes juntos
                 tipo = (h.get("tipo") or "dato_personal")[:40]
                 clave = (h.get("clave") or "")[:80]
                 valor = (h.get("valor") or "")[:500]
                 if not (clave and valor):
                     continue
                 # Anti-alucinación: el valor debe estar anclado al mensaje original
-                if not self._hecho_esta_en_mensaje(valor, mensaje_usuario):
+                _ancla = next((m for m in (mensajes or [mensaje_usuario])
+                               if self._hecho_esta_en_mensaje(valor, m)), None)
+                if _ancla is None:
                     logger.info("Hecho descartado (no anclado al mensaje): %s = %s",
                                 clave, valor[:80])
                     continue
-                _motivo = self._hecho_de_un_turno(valor, mensaje_usuario)
+                _motivo = self._hecho_de_un_turno(valor, _ancla)
                 if _motivo:
                     logger.info("Hecho descartado (%s): %s = %s",
                                 _motivo, clave, valor[:80])
@@ -3176,6 +3401,34 @@ class WhatsAppAPI:
                           "de visión disponible.")
         return "\n".join(lineas)
 
+    _PIDE_FORMATO_RE = re.compile(
+        r"\b(?:resum\w*|en\s+(?:\w+\s+)?(?:l[ií]neas?|frases?|p[aá]rrafos?|palabras)|"
+        r"breve(?:mente)?|en\s+corto|cu[eé]ntame)\b", re.I)
+    _CLAVES_DE_QUIEN = {"pareja", "hermano", "hermana", "madre", "padre", "hijo", "hija",
+                        "mascota", "trabajo", "transporte"}
+
+    def _resumen_redactado(self, pedido: str, perfil: dict, utiles) -> str:
+        datos = [f"- {c}: {v}" for c, v in utiles[:20]]
+        if perfil.get("nombre"):
+            datos.insert(0, f"- nombre: {perfil['nombre']}")
+        try:
+            r = self.orch.model.generate_from_messages([
+                {"role": "system", "content": (
+                    "Eres Celestia. Te piden un resumen de lo que sabes de la persona con la "
+                    "que hablas. Escríbelo de tú, en español, en el formato que pide, usando "
+                    "SOLO estos datos: no añadas ni supongas nada. Sin títulos ni preguntas.")},
+                {"role": "user", "content": f"Lo que pide: {pedido}\n\nLos datos:\n"
+                                            + "\n".join(datos)}],
+                max_new_tokens=350, temperature=0.3)
+        except Exception as e:
+            logger.info("Resumen redactado: falló (%s)", e)
+            return ""
+        r = (r or "").strip()
+        from .investigacion import _SIN_CEREBRO_RE
+        if not r or _SIN_CEREBRO_RE.search(r):      # también «necesito una clave de IA»
+            return ""
+        return r
+
     def _responder_introspeccion(self, texto: str) -> str:
         """Responde con datos reales del estado de Celestia.
         Sesión 32 (BUG-S143): si la pregunta es SOBRE EL USUARIO («qué
@@ -3222,9 +3475,18 @@ class WhatsAppAPI:
                 if any(es_el_mismo_hecho(v, valor) for _, v in utiles):
                     continue
                 utiles.append((clave.replace("_", " "), valor))
+            # «Resume en cinco líneas…»: con la lista fija salían diez líneas de
+            # «clave: valor» (examen de nivel, 5 oct 2026). Si pide un formato, lo
+            # escribe el modelo con estos datos y sólo con estos.
+            if utiles and self._PIDE_FORMATO_RE.search(t):
+                redactado = self._resumen_redactado(texto, perfil, utiles)
+                if redactado:
+                    return redactado
             for clave, valor in utiles[:12]:
-                # Si el valor ya es una frase, la clave interna sobra.
-                partes.append(f"  · {valor}" if len(valor.split()) > 4
+                # Si el valor ya es una frase, la clave interna sobra; salvo si dice
+                # quién es («hermano: Javi (vive en Oporto…)»).
+                partes.append(f"  · {valor}" if (len(valor.split()) > 4
+                                                and clave not in self._CLAVES_DE_QUIEN)
                               else f"  · {clave}: {valor}")
             if not utiles and not perfil:
                 partes.append(
@@ -4169,10 +4431,15 @@ class WhatsAppAPI:
             return None
 
     # ── LLM sin historial ─────────────────────
-    def _generar_codigo(self, prompt: str, max_tokens: int = 1200) -> str:
-        """Llama al LLM directamente sin actualizar el historial de conversación."""
+    def _generar_codigo(self, prompt: str, max_tokens: int = 1200,
+                        sistema: Optional[str] = None) -> str:
+        """Llama al LLM directamente sin actualizar el historial de conversación.
+
+        `sistema` para lo que no es un script de Python: con el de siempre («responde
+        ÚNICAMENTE con código Python») el generador de proyectos escribió `hero.jpg`
+        como un script (examen de nivel, 5 oct 2026)."""
         messages = [
-            {"role": "system", "content": "Eres un experto en Python y Linux. Responde ÚNICAMENTE con código Python ejecutable, sin explicaciones ni bloques markdown."},
+            {"role": "system", "content": sistema or "Eres un experto en Python y Linux. Responde ÚNICAMENTE con código Python ejecutable, sin explicaciones ni bloques markdown."},
             {"role": "user", "content": prompt},
         ]
         p = self.orch.hparams.params()
@@ -4376,7 +4643,7 @@ class WhatsAppAPI:
             ]
             sandbox_used = "firejail"
         else:
-            cmd = ["python3", str(ruta_tmp)]
+            cmd = [python_de_scripts(), str(ruta_tmp)]
             sandbox_used = "rlimit"
         # La petición de prueba viaja como argumento, igual que al usarla de verdad
         cmd += list(args)
@@ -4384,8 +4651,10 @@ class WhatsAppAPI:
             res = subprocess.run(
                 cmd,
                 capture_output=True, text=True, timeout=timeout,
+                encoding="utf-8", errors="replace",
                 cwd=sandbox_dir,
-                env=env_limpio,
+                env=entorno_de_scripts(env_limpio),
+                **SIN_VENTANA,
                 preexec_fn=(self._aplicar_limites_sandbox
                             if sandbox_used == "rlimit" and os.name == "posix"
                             else None),
@@ -4609,7 +4878,10 @@ class WhatsAppAPI:
         inicio = time.time()
         ultimo_error = ""
 
+        t = trabajo.actual()
         while intento < self._MAX_INTENTOS_APRENDER:
+            if t.parar_pedido():
+                return f"✗ Parado por ti tras {intento} intento(s)."
             if time.time() - inicio > self._TIMEOUT_APRENDER_SEG:
                 logger.warning("Tiempo agotado aprendiendo '%s' tras %d intentos", tarea, intento)
                 return (
@@ -4622,6 +4894,7 @@ class WhatsAppAPI:
                 if tarea in self._aprendizajes:
                     self._aprendizajes[tarea]["intentos"] = intento
             logger.info("Intento %d — aprendiendo: %s", intento, tarea)
+            t.paso(f"Intento {intento}: escribo el código")
             if intento in (3, 5) and hasattr(self, "_notificar_canal"):
                 try:
                     self._notificar_canal(
@@ -4681,11 +4954,15 @@ class WhatsAppAPI:
             problema = self._problema_antes_de_probar(codigo, tarea)
             if problema:
                 logger.info("Intento %d rechazado sin ejecutarlo: %s", intento, problema)
+                t.comprobacion("Revisión antes de probar", False, motivo=problema)
                 error_anterior = ultimo_error = f"NO VALE (no se ha ejecutado): {problema}."
                 contexto_web = ""
                 continue
 
             exito, salida = self._probar_codigo(codigo, args=(tarea,))
+            t.comprobacion("Probarlo en la zona aislada", bool(exito),
+                           motivo="" if exito else self._clasificar_error_skill(salida)["resumen"],
+                           detalle=salida or "")
 
             if exito and (salida or "").lstrip().upper().startswith("IMPOSIBLE"):
                 # Decirlo es mejor que fingir: no se gastan más intentos
@@ -4701,6 +4978,7 @@ class WhatsAppAPI:
                                 "metidos en el código")
                 if not problema:
                     real, motivo, claves = self._juzgar_skill(tarea, codigo, salida)
+                    t.comprobacion("El revisor", real, motivo=motivo or "")
                     if real is None:
                         # Sin revisor no se guarda nada: es lo que dejó la basura
                         logger.warning("Aprender '%s': %s", tarea, motivo)
@@ -4781,6 +5059,7 @@ class WhatsAppAPI:
                         continue
                     busquedas_hechas.add(q)
                     logger.info("Buscando en internet: %s", q)
+                    t.paso(f"Busco cómo arreglarlo: {q}")
                     resultado = tools.buscar_web(q)
                     if resultado and "Sin resultados" not in resultado and "Error al buscar" not in resultado:
                         contexto_web = resultado[:1500]
@@ -4814,12 +5093,13 @@ class WhatsAppAPI:
             # Todo lo que dijo Enzo tras «usa tu habilidad de» — el script saca
             # de ahí sus datos (cantidad, URL, ciudad…).
             r = subprocess.run(
-                ["python3", str(candidata), nombre_buscado],
+                [python_de_scripts(), str(candidata), nombre_buscado],
                 capture_output=True, text=True, timeout=30,
-                cwd=str(ROOT),
+                encoding="utf-8", errors="replace",
+                cwd=str(ROOT), env=entorno_de_scripts(os.environ), **SIN_VENTANA,
             )
-            salida = r.stdout.strip()
-            errores = r.stderr.strip()
+            salida = (r.stdout or "").strip()
+            errores = (r.stderr or "").strip()
             if r.returncode != 0:
                 return f"⚠ Habilidad '{candidata.stem}' terminó con error:\n{errores or salida}"
             return salida or f"✓ Habilidad '{candidata.stem}' ejecutada (sin salida)."
@@ -4901,8 +5181,10 @@ class WhatsAppAPI:
             return None
         logger.info("Usando sola la habilidad aprendida '%s'", ruta.stem)
         try:
-            r = subprocess.run(["python3", str(ruta), texto], capture_output=True,
-                               text=True, timeout=30, cwd=str(ROOT))
+            r = subprocess.run([python_de_scripts(), str(ruta), texto], capture_output=True,
+                               text=True, timeout=30, encoding="utf-8", errors="replace",
+                               cwd=str(ROOT), env=entorno_de_scripts(os.environ),
+                               **SIN_VENTANA)
         except Exception as e:
             logger.warning("Habilidad '%s' falló al usarla sola: %s", ruta.stem, e)
             return None
@@ -4962,10 +5244,9 @@ class WhatsAppAPI:
             self._aprendizajes[tarea] = {
                 "estado": "en_curso", "inicio": time.time(), "resultado": None, "intentos": 0,
             }
-        threading.Thread(
-            target=self._aprender_en_background, args=(tarea,),
-            daemon=True, name="aprender-skill",
-        ).start()
+        trabajo.lanzar(self._aprender_en_background, tarea,
+                       titulo=f"Aprender: {tarea}", hilo=self.orch.hilo_actual,
+                       nombre_hilo="aprender-skill")
         return (f"📚 Voy a aprender '{tarea}'. Lo pruebo y lo reviso antes de guardarlo; "
                 f"tardo unos minutos y te aviso.")
 
@@ -5091,6 +5372,73 @@ class WhatsAppAPI:
         finally:
             self._cerrar_trabajo()
 
+    def _investigar_async(self, encargo: str, canal: str = "", contexto: str = "",
+                          hilo: str = "") -> str:
+        """Un encargo de investigación entero (investigacion.py), en segundo plano.
+
+        `contexto` es la charla reciente («vale, pues hazme el plan completo» no dice
+        de qué) y `hilo` el chat donde se pidió: el resultado se apunta ahí para que
+        «¿y el día 3?» sepa de qué se habla.
+        """
+        try:
+            from .investigacion import hacer, PARADO
+            from .tools import AgentTools
+            herramientas = AgentTools(self.orch.connectivity)
+            texto, estado = hacer(
+                encargo, herramientas.buscar_web,
+                lambda: list(getattr(herramientas, "_ultimas_urls", None) or []),
+                self.orch.model.generate_from_messages, contexto=contexto)
+            # La web pinta el markdown tal cual; WhatsApp, Telegram y la terminal
+            # necesitan su dialecto (sin tablas, con una estrella…).
+            if canal and canal != "web":
+                texto = formato.para_canal(formato.normalizar(texto), canal)
+            self._notificar_canal(texto, destino=canal)
+            self._apuntar_en_hilo(hilo, encargo, texto)
+            if estado == PARADO:
+                trabajo.actual().terminar("Parado: entregado lo que había", parado=True)
+            return "Hecho: te lo he dejado en el chat"
+        except Exception as e:
+            logger.exception("Investigación: falló")
+            self._notificar_canal(f"✗ No pude terminar el encargo: {e}", destino=canal)
+            raise
+        finally:
+            self._cerrar_trabajo()
+
+    # «Hazme una web/app…»: el artefacto es lo que se pide, no el tema del informe
+    # («un estudio del sistema sanitario» o «sobre el programa Erasmus» sí lo son).
+    _ENCARGO_ES_ARTEFACTO_RE = re.compile(
+        r"\b(?:haz(?:me)?|h[aá]zme|crea(?:me)?|cr[eé]ame|programa(?:me)?|desarrolla(?:me)?|"
+        r"dise[nñ]a(?:me)?|monta(?:me)?|prepara(?:me)?)\s+(?:un|una)\s+"
+        r"(?:app|aplicaci[oó]n|web|p[aá]gina(?:\s+web)?|juego|bot|script|plugin|extensi[oó]n)\b",
+        re.I)
+
+    def _charla_del_hilo(self, n: int = 6) -> str:
+        """Lo último que se habló EN ESTE CHAT (la memoria corta es de todos)."""
+        try:
+            turnos = list(self.orch.conv_history)[-n:]
+        except Exception:
+            return ""
+        partes = []
+        for t in turnos:
+            quien = "Usuario" if t.get("role") == "user" else "Celestia"
+            partes.append(f"{quien}: {str(t.get('content') or '')[:400]}")
+        return "\n".join(partes)
+
+    def _apuntar_en_hilo(self, hilo: str, pedido: str, respuesta: str) -> None:
+        """Apunta un turno que acabó en segundo plano, en el chat donde se pidió.
+
+        En el historial de ese chat (aunque mientras tanto se haya abierto otro) y,
+        como el historial se recorta a 700 caracteres por turno, también como
+        documento abierto del chat: «¿y el día 3?» encuentra el día 3.
+        """
+        try:
+            from . import documento_abierto
+            documento_abierto.abrir_texto(hilo, "lo que te preparé", respuesta)
+            with self._lock:
+                self.orch.anotar_turno(pedido, respuesta, hilo=hilo or None)
+        except Exception as e:
+            logger.debug("No se apuntó el turno en segundo plano: %s", e)
+
     def _aprender_en_background(self, tarea: str) -> None:
         """Aprende la habilidad en segundo plano y notifica al usuario cuando termina."""
         inicio = time.time()
@@ -5155,6 +5503,15 @@ class WhatsAppAPI:
         except Exception:
             pass
 
+        # El cuaderno lo cierra quien sabe cómo acabó: `lanzar` sólo ve que
+        # esto devuelve None y lo daba por «Hecho» aunque hubiera fallado.
+        t = trabajo.actual()
+        if estado_final == "terminado_ok":
+            t.terminar(resultado_final.lstrip("✓ ").strip() or "Aprendido")
+        elif t.parar_pedido():
+            t.terminar(f"lo dejo tras {intentos_finales} intento(s)", ok=False, parado=True)
+        else:
+            t.terminar(resultado_final.lstrip("✗ ").strip() or "No lo aprendí", ok=False)
         self._notificar_canal(notif)
         logger.info("Aprendizaje en background terminado: %s", tarea)
 
@@ -5210,6 +5567,9 @@ class WhatsAppAPI:
         # reescriba (perdía el token y la app jamás se abría aunque Shizuku
         # estuviera activo). hora_ciudad también es resultado verificable.
         "abrir_app", "cerrar_app", "hora_ciudad",
+        # 6 oct 2026: el aviso de «me pongo con ello» sale tal cual; pasado por el
+        # modelo, volvía a pedir permiso para buscar (examen de nivel).
+        "investigar",
         # Sesión 61: «¿puedes tocar la pantalla?» con Shizuku encendido se
         # contestaba QUE NO. El resultado sale de preguntarle al aparato: que
         # lo reescriba el modelo es volver a la respuesta de memoria.
@@ -5322,6 +5682,16 @@ class WhatsAppAPI:
     # Herramientas cuyo resultado ES la respuesta: se devuelve tal cual, sin
     # pasarlo por el modelo. Son las deterministas — que el LLM «redacte» un
     # conteo es la forma más fácil de que un dato exacto deje de serlo.
+    _MAX_PREGUNTA_DIRECTA = 200
+    _PIDE_REDACTAR_RE = re.compile(
+        r"\b(?:escr[ií]be(?:me|le|nos)?|red[aá]cta(?:me|le)?|prep[aá]rame|hazme|"
+        r"correo|e-?mail|carta|mensaje|reclamaci[oó]n|informe|resumen|texto|guion|post)\b",
+        re.I)
+    # Lo que sí hay que ir a mirar aunque luego se pida un texto con ello.
+    _PIDE_MIRAR_RE = re.compile(
+        r"\b(?:archivos?|ficheros?|carpetas?|b[uú]sca\w*|internet|web|enlaces?|url|"
+        r"pantalla|captura|recordatorios?|alarmas?|agenda|calendario|mis\s+notas)\b",
+        re.I)
     _TOOLS_DIRECTAS = frozenset({
         "contar_letras", "contar_palabras", "longitud_texto", "calcular",
         "porcentaje", "silabas", "dias_hasta", "hora_ciudad", "convertir_divisa",
@@ -5353,6 +5723,15 @@ class WhatsAppAPI:
             logger.info("Dijo que sí a lo que ofrecí — a hacerlo")
             return self._buscar_la_manera(aceptada, modelo)
         if not self._SENAL_ACCIONABLE_RE.search(texto_usuario or ""):
+            return None
+        # Pedir un texto (un correo, una carta…) con los datos ya en el mensaje no es
+        # trabajo de herramientas: lo escribe el modelo de siempre. Examen, 7 oct
+        # 2026: «escríbeme el correo de reclamación…» acababa en la cuenta suelta o
+        # en el «Lo que encontré: …» del redactor del empeño, sin correo.
+        if (len(texto_usuario or "") > self._MAX_PREGUNTA_DIRECTA
+                and self._PIDE_REDACTAR_RE.search(texto_usuario or "")
+                and not self._PIDE_MIRAR_RE.search(texto_usuario or "")):
+            logger.info("Pide un texto con los datos delante — sin empeño")
             return None
         # Sesión 74 — un seguimiento de algo que acaba de buscarse en internet
         # («¿Y cuántos habitantes tiene?» tras la capital de Australia) no es
@@ -5428,9 +5807,26 @@ class WhatsAppAPI:
             # Sesión 74: con el hilo delante (ver empeno._turnos_de_contexto).
             hist = getattr(self.orch, "conv_history", None)
             contexto = hist if isinstance(hist, list) else None
-            intento = empeno.intentar(texto_usuario, modelo, ejecutar,
-                                      tools_payload(), SAFE_TOOL_NAMES,
-                                      contexto=contexto)
+            # getattr: un fallo aquí lo traga el except de abajo y el empeño
+            # entero se quedaba sin responder (lo cazó test_function_calling).
+            cuaderno = trabajo.Perezoso(f"Encargo de varios pasos: {texto_usuario}",
+                                        hilo=getattr(self.orch, "hilo_actual", ""))
+            try:
+                with trabajo.en(cuaderno):
+                    intento = empeno.intentar(texto_usuario, modelo, ejecutar,
+                                              tools_payload(), SAFE_TOOL_NAMES,
+                                              contexto=contexto)
+            except Exception as e:
+                # El except de abajo devuelve None: sin esto la tarjeta se
+                # quedaba «trabajando» hasta parecer atascada.
+                cuaderno.terminar(f"Falló: {e}", ok=False)
+                raise
+            if intento.parado:
+                cuaderno.terminar(f"lo dejo tras {len(intento.evidencias)} paso(s)", ok=False,
+                                  parado=True)
+            else:
+                cuaderno.terminar("Hecho" if intento.hubo_suerte
+                                  else "No encontré con qué responder", ok=True)
         except Exception as e:
             logger.debug("empeño no disponible: %s", e)
             return None
@@ -5446,8 +5842,12 @@ class WhatsAppAPI:
             self._ultima_deterministica = (ultima.herramienta, dict(ultima.params),
                                            str(ultima.resultado))
 
-        # Un solo paso y de las deterministas: el resultado ya es la respuesta.
-        if len(intento.evidencias) == 1 and ultima.herramienta in self._TOOLS_DIRECTAS:
+        # Un solo paso y de las deterministas: el resultado ya es la respuesta…
+        # si es eso lo que se preguntó. Examen, 7 oct 2026: «escríbeme el correo de
+        # reclamación…» calculó el consumo y contestó «23418 - 23102 = 316» y nada más.
+        if (len(intento.evidencias) == 1 and ultima.herramienta in self._TOOLS_DIRECTAS
+                and len(texto_usuario or "") <= self._MAX_PREGUNTA_DIRECTA
+                and not self._PIDE_REDACTAR_RE.search(texto_usuario or "")):
             logger.info("WA function-calling [%s]: %.80s",
                         ultima.herramienta, ultima.resultado)
             return ultima.resultado
@@ -5520,6 +5920,14 @@ class WhatsAppAPI:
             # de ZZZ»: entre medias puede haber pasado media conversación.
             if getattr(self, "_tool_turno_anterior", "") != "zzz":
                 return None  # cae al LLM
+        # Un encargo de investigación que en realidad es una app o una web (eso es
+        # del generador de proyectos), o un «plan completo» en plena partida de ZZZ.
+        # Antes de apuntar el tool: si no, el seguimiento de ZZZ del turno siguiente
+        # creía que lo último había sido «investigar» (revisión, 6 oct 2026).
+        if tool == "investigar" and (
+                self._ENCARGO_ES_ARTEFACTO_RE.search(texto_usuario)
+                or getattr(self, "_tool_turno_anterior", "") == "zzz"):
+            return None
         self._ultimo_tool = tool
         # Tracking global del último tool (usado por seguimientos)
         self._ultimo_tool_global = tool
@@ -5537,6 +5945,15 @@ class WhatsAppAPI:
             tema_doc = intent["params"]["tema"]
             formato_doc = intent["params"]["formato"]
             contexto = self._contexto_conversacion_reciente(6)
+            # «Hazme un PDF con esto» con un adjunto: el adjunto ya no viaja en el
+            # texto (documento_abierto lo aparta), así que se le pasa aquí.
+            try:
+                from . import documento_abierto
+                _adjunto = documento_abierto.para_herramienta(self.orch.hilo_actual)
+            except Exception:
+                _adjunto = ""
+            if _adjunto:
+                contexto = f"{contexto}\n\n{_adjunto}".strip()
             # Lanzar en background: PDFs/DOCX pueden tardar 20-40 s y el endpoint
             # bloquearía la respuesta de WhatsApp todo ese tiempo. Mejor un ack y
             # mandar el archivo proactivamente cuando esté.
@@ -5553,6 +5970,25 @@ class WhatsAppAPI:
             ).start()
             return (f"✍️ Preparando '{tema_doc}' en {formato_doc.upper()}. "
                     f"Te lo paso en cuanto esté listo.")
+        if tool == "investigar":
+            encargo = intent["params"]["encargo"]
+            hilo = self.orch.hilo_actual
+            # El contador se abre aquí, como con los documentos: así la respuesta
+            # sale ya marcada «en camino» y el chat se queda esperando el resultado.
+            self._abrir_trabajo()
+            try:
+                trabajo.lanzar(self._investigar_async, encargo, _CANAL_PETICION.get(""),
+                               self._charla_del_hilo(), hilo,
+                               titulo=f"Investigar: {encargo}", hilo=hilo,
+                               nombre_hilo="investigar")
+            except Exception as e:
+                # Si el hilo ni arranca, el contador no puede quedarse abierto: el
+                # chat esperaría para siempre algo que no va a llegar.
+                self._cerrar_trabajo()
+                logger.exception("Investigación: no arrancó")
+                return f"✗ No he podido ponerme con el encargo: {e}"
+            return ("🔎 Me pongo con ello: busco, leo y te lo escribo entero. Te lo dejo aquí "
+                    "en unos minutos; mientras, puedes verme trabajar en el panel.")
         if tool == "tarea_autonoma":
             tarea = intent["params"]["tarea"]
             app   = intent["params"].get("app", "")
@@ -5880,11 +6316,278 @@ class WhatsAppAPI:
         else:
             self._generar_proyecto_generico(peticion, descripcion_imagen)
 
+    # ── Las piezas de un proyecto: enteras y comprobadas (piezas.py) ─────────
+    MAX_TOKENS_PIEZA = 6000
+    _EXT_CODIGO = {".py", ".js", ".mjs", ".ts", ".jsx", ".tsx", ".json", ".css", ".scss",
+                   ".lua", ".luau", ".java", ".c", ".cpp", ".h", ".cs", ".go", ".rs", ".php",
+                   ".rb", ".sh", ".kt", ".swift", ".sql", ".yaml", ".yml", ".toml"}
+    _SISTEMA_PLAN_PROYECTO = ("Eres un arquitecto de software. Responde SOLO con el JSON "
+                              "pedido, sin explicaciones ni markdown.")
+
+    def _plan_de_proyecto(self, prompt_plan: str, max_tokens: int) -> Optional[list]:
+        """El plan de ficheros. Una segunda vez si no se pudo leer: con MiMo llegaba
+        vacío y el proyecto moría al momento («Expecting value»)."""
+        from . import piezas
+        for intento in range(2):
+            pie = ("" if not intento else "\n\nOJO: tu respuesta anterior no era un JSON "
+                   "válido. Responde ÚNICAMENTE con la lista JSON, empezando por «[».")
+            try:
+                # La segunda, con el doble de sitio: MiMo piensa a cuenta del tope y el
+                # plan salía cortado las dos veces (cuentas-viaje, 11 oct 2026).
+                bruto = self._generar_codigo(prompt_plan + pie, max_tokens=max_tokens * (1 + intento),
+                                             sistema=self._SISTEMA_PLAN_PROYECTO)
+            except Exception as e:
+                logger.info("Plan de proyecto: falló (%s)", e)
+                continue
+            plan = piezas.leer_plan(bruto)
+            if plan:
+                return plan
+        return None
+
+    def _sin_binarias(self, plan: list, t) -> list:
+        from . import piezas
+        binarias = [a["ruta"] for a in plan if piezas.es_binaria(a["ruta"])]
+        if binarias:
+            t.paso("Sin imágenes ni binarios (no se pueden escribir como texto): "
+                   + ", ".join(binarias))
+        return [a for a in plan if not piezas.es_binaria(a["ruta"])]
+
+    def _escribir_pieza(self, t, prompt_arch: str, ruta_rel: str) -> Tuple[str, List[str]]:
+        """Un fichero entero y comprobado: si se corta, sigue donde lo dejó; si no
+        pasa la comprobación, se rehace una vez diciéndole por qué."""
+        from . import piezas
+
+        # El limpiador de siempre quita TODOS los ``` (los bloques de un README) y
+        # cambia «» y — por comillas rectas: sólo para el código, donde estorban.
+        es_codigo = Path(ruta_rel).suffix.lower() in self._EXT_CODIGO
+
+        def limpiar(texto: str) -> str:
+            # «» y — estorban si el modelo los usa como comillas del código, pero dentro
+            # de un texto son suyos: el f"«{texto}» no es una fecha" de peluqueria.py
+            # (examen, 11 oct 2026) quedó en f""{texto}" …" y no compilaba. Si vale tal
+            # cual, no se toca; si no, se limpia sólo si así sí vale (o no se puede saber).
+            if not es_codigo or piezas.vale_tal_cual(ruta_rel, texto):
+                return texto.strip("\n")
+            limpio = self._limpiar_codigo(texto)
+            if piezas.vale_tal_cual(ruta_rel, limpio) or not piezas.se_puede_validar(ruta_rel):
+                return limpio
+            return texto.strip("\n")
+
+        def cortado_de_verdad(texto: str) -> str:
+            # Lo que se ve (un HTML sin </html>) y lo que dice el proveedor: un
+            # Python cortado en «por_mes» compila y parecía entero (7 oct 2026).
+            from .model import se_corto
+            return (piezas.cortado(ruta_rel, texto)
+                    or ("el modelo lo dejó a medias (límite de longitud)" if se_corto() else ""))
+
+        def pedir(prompt: str) -> str:
+            from .model import es_respaldo
+            bruto = self._generar_codigo(prompt, max_tokens=self.MAX_TOKENS_PIEZA,
+                                         sistema=piezas.SISTEMA_ARCHIVO)
+            # Examen de nivel (11 oct 2026, MiMo caído): la disculpa del respaldo se
+            # guardó como cuentas.py. Sin cerebro no hay archivo: es un fallo.
+            if es_respaldo(bruto):
+                raise RuntimeError("no contestó ningún cerebro")
+            return bruto
+
+        def generar(prompt: str, continuaciones: int = piezas.MAX_CONTINUACIONES) -> str:
+            texto = piezas.quitar_vallas(pedir(prompt)).strip("\n")
+            for _ in range(continuaciones):
+                motivo = cortado_de_verdad(limpiar(texto))
+                if not motivo or not texto:
+                    break
+                t.paso(f"{ruta_rel}: {motivo} → sigo donde lo dejó")
+                try:
+                    mas = piezas.quitar_vallas(pedir(
+                        prompt + "\n\n" + piezas.prompt_continuar(ruta_rel, texto)))
+                except Exception as e:          # se queda lo que hay, y la comprobación lo dirá
+                    logger.info("Seguir %s falló: %s", ruta_rel, e)
+                    break
+                if not mas.strip():
+                    break
+                texto = piezas.unir(texto, mas, ruta_rel)
+            return limpiar(texto)               # una vez, con el archivo entero
+
+        contenido = generar(prompt_arch)
+        fallos = piezas.comprobar(ruta_rel, contenido)
+        if fallos:
+            t.paso(f"{ruta_rel}: {fallos[0]} → lo rehago")
+            # Como mucho cinco llamadas por fichero: tres la primera vez, dos al rehacerlo.
+            try:
+                otra = generar(prompt_arch + "\n\nOJO: una versión anterior de este archivo "
+                               f"tenía estos fallos: {'; '.join(fallos)}. Escríbelo entero y bien.",
+                               continuaciones=1)
+            except Exception as e:              # se queda la primera versión
+                logger.info("Rehacer %s falló: %s", ruta_rel, e)
+                otra = ""
+            fallos_otra = piezas.comprobar(ruta_rel, otra)
+            if otra and len(fallos_otra) < len(fallos):
+                contenido, fallos = otra, fallos_otra
+        t.comprobacion(f"Comprobar {ruta_rel}", not fallos, motivo="; ".join(fallos))
+        return contenido, fallos
+
+    MAX_REHECHOS_POR_IMPORTS = 3
+
+    def _casar_piezas(self, t, base_dir, escritos: Dict[str, str], prompts: Dict[str, str],
+                      con_fallos: Dict[str, List[str]]) -> None:
+        """Los ficheros tienen que casar entre sí: lo que un .py importa de otro
+        existe (piezas.imports_rotos) y, en una web, el CSS da estilo a las clases
+        del HTML y el JS busca ids que están (piezas.nombres_que_no_casan). El que
+        no casa se rehace una vez con lo que hay de verdad delante."""
+        from . import piezas
+
+        def problemas(esc: Dict[str, str]) -> Dict[str, List[str]]:
+            sale: Dict[str, List[str]] = {}
+            for r, d, f in piezas.imports_rotos(esc):
+                sale.setdefault(r, []).append(f"importa {', '.join(f)} de {d}, que no lo define")
+            for r, motivo in piezas.nombres_que_no_casan(esc):
+                sale.setdefault(r, []).append(motivo)
+            return sale
+
+        hay_py = any(r.endswith(".py") for r in escritos)
+        hay_web = any(r.lower().endswith((".html", ".htm")) for r in escritos)
+        if not (hay_py or hay_web):
+            return
+        malos = problemas(escritos)
+        for ruta_rel in sorted(malos)[:self.MAX_REHECHOS_POR_IMPORTS]:
+            if t.parar_pedido() or ruta_rel not in prompts:
+                continue
+            detalle = "; ".join(malos[ruta_rel])
+            t.paso(f"{ruta_rel}: {detalle[:160]} → lo rehago")
+            otros = {k: v for k, v in escritos.items() if k != ruta_rel}
+            try:
+                nuevo, fallos = self._escribir_pieza(
+                    t, prompts[ruta_rel] + "\n\n" + piezas.contexto(ruta_rel, otros)
+                    + f"\n\nOJO: la versión anterior {detalle}. Escríbelo entero usando SÓLO "
+                    "los nombres que existen de verdad en los otros archivos.", ruta_rel)
+            except Exception as e:              # se queda el que había, y se avisa
+                logger.info("Rehacer %s para que case con los otros falló: %s", ruta_rel, e)
+                continue
+            sigue_mal = ruta_rel in problemas({**escritos, ruta_rel: nuevo})
+            if nuevo and not sigue_mal and not fallos:
+                escritos[ruta_rel] = nuevo
+                (base_dir / ruta_rel).write_text(nuevo, encoding="utf-8")
+                con_fallos.pop(ruta_rel, None)
+        malos = problemas(escritos)
+        t.comprobacion("Los archivos casan entre sí", not malos,
+                       motivo="; ".join(f"{r}: {m[0][:120]}" for r, m in list(malos.items())[:5]))
+        for r, motivos in malos.items():
+            con_fallos.setdefault(r, []).extend(motivos)
+
+    MAX_RONDAS_PRUEBAS = 2
+
+    def _probar_proyecto(self, t, base_dir, escritos: Dict[str, str], prompts: Dict[str, str],
+                         con_fallos: Dict[str, List[str]]) -> None:
+        """Ejecuta sus pruebas en la caja cerrada (caja.py) y, si fallan, rehace el
+        fichero donde está el fallo viendo la salida; dos rondas como mucho, y lo que
+        empeora se deshace. Enzo, 11 oct 2026: que lo que escriba funcione siempre."""
+        from . import caja, piezas
+        if not (caja.activa() and any(piezas.es_prueba(r) and r.endswith(".py") for r in escritos)
+                and any(r.endswith(".py") and not piezas.es_prueba(r) for r in escritos)):
+            return
+        def a_rehacer(r, ronda: int, codigo_sin_mejora: bool) -> List[str]:
+            # Primero el código: un fallo dentro de él, o, si sólo falla la comprobación
+            # de una prueba, el código que esa prueba usa. La prueba sólo se rehace
+            # después, si rehacer el código no mejoró nada: si no, se arreglaría la
+            # prueba para que aceptase el fallo. (Cuentas-viaje, 11 oct 2026: dos pruebas
+            # esperaban un código de salida donde argparse lanza SystemExit, y se rehizo
+            # dos veces el programa, que estaba bien.)
+            en_codigo = [c for c in r.culpables if c in prompts and not piezas.es_prueba(c)]
+            pruebas = [c for c in r.culpables if c in prompts and piezas.es_prueba(c)]
+            if codigo_sin_mejora and pruebas:
+                return pruebas[:2]
+            if en_codigo:
+                return en_codigo[:2]
+            if ronda == 0:
+                usados: List[str] = []
+                for p in pruebas:
+                    for d in piezas.usos(p, escritos[p], set(escritos)):
+                        if d in prompts and not piezas.es_prueba(d) and d not in usados:
+                            usados.append(d)
+                if usados:
+                    return usados[:2]
+            return pruebas[:2]
+
+        def mejora(r, otra, antes: Dict[str, str]) -> bool:
+            # Menos fallos; o los mismos, pero ejecutando más pruebas o con los ficheros
+            # rehechos ya legibles. (Cuentas-viaje, 11 oct 2026: la prueba rehecha ya
+            # compilaba, pero «1 de 1 falla» contaba igual que antes y se volvió a la
+            # que no compilaba.)
+            if otra.fallidas != r.fallidas:
+                return otra.fallidas < r.fallidas
+            if otra.ejecutadas != r.ejecutadas:
+                return otra.ejecutadas > r.ejecutadas
+            return (sum(len(piezas.comprobar(c, escritos[c])) for c in antes)
+                    < sum(len(piezas.comprobar(c, v)) for c, v in antes.items()))
+
+        t.paso("Ejecuto sus pruebas en una caja cerrada (sin red ni nada de fuera)")
+        r = caja.probar(base_dir)
+        codigo_sin_mejora = False
+        for ronda in range(self.MAX_RONDAS_PRUEBAS):
+            if r.estado != "fallan" or t.parar_pedido():
+                break
+            culpables = a_rehacer(r, ronda, codigo_sin_mejora)
+            if not culpables:
+                break
+            t.paso(f"{r.fallidas} de {r.ejecutadas} pruebas fallan → rehago "
+                   f"{', '.join(culpables)}", detalle=r.salida[-1500:])
+            antes = {c: escritos[c] for c in culpables}
+            for c in culpables:
+                otros = {k: v for k, v in escritos.items() if k != c}
+                ojo = (f"\n\nOJO: al ejecutar las pruebas del proyecto, {r.fallidas} de "
+                       f"{r.ejecutadas} fallan. La salida:\n<<<\n{r.salida[-3000:]}\n>>>\n"
+                       "Arregla ESTE archivo para que todo funcione. Si una prueba espera "
+                       "algo que la petición no pide, se corrige la prueba; si la petición lo "
+                       "pide, el fallo es del código. Escríbelo entero.")
+                try:
+                    nuevo, fallos = self._escribir_pieza(
+                        t, prompts[c] + "\n\n" + piezas.contexto(c, otros) + ojo, c)
+                except Exception as e:              # se queda el que había
+                    logger.info("Rehacer %s tras las pruebas falló: %s", c, e)
+                    continue
+                if nuevo and not fallos:
+                    escritos[c] = nuevo
+                    (base_dir / c).write_text(nuevo, encoding="utf-8")
+            otra = caja.probar(base_dir)
+            if otra.estado == "no_se_pudo" or (otra.estado == "fallan"
+                                               and not mejora(r, otra, antes)):
+                for c, texto in antes.items():      # no ha mejorado: como estaba
+                    escritos[c] = texto
+                    (base_dir / c).write_text(texto, encoding="utf-8")
+                codigo_sin_mejora = codigo_sin_mejora or not any(
+                    piezas.es_prueba(c) for c in culpables)
+                continue
+            r = otra
+        if r.estado == "no_se_pudo":
+            t.comprobacion("Sus pruebas se ejecutan", False, motivo=r.motivo)
+            return
+        t.comprobacion("Sus pruebas pasan", r.estado == "ok",
+                       motivo=(f"{r.fallidas} de {r.ejecutadas} fallan" if r.fallidas
+                               else f"las {r.ejecutadas} pasan"))
+        if r.estado == "fallan":
+            con_fallos.setdefault("las pruebas", []).append(
+                f"{r.fallidas} de {r.ejecutadas} fallan al ejecutarlas")
+
+    def _avisos_de_piezas(self, t, base_dir, con_fallos: Dict[str, List[str]]) -> str:
+        """Lo que no quedó bien, para decirlo al entregar en vez de «✓ listo»."""
+        from . import piezas
+        rotas = piezas.referencias_rotas(base_dir)
+        t.comprobacion("Lo que enlazan las páginas existe", not rotas,
+                       motivo="; ".join(rotas[:5]))
+        avisos = [f"{r}: {'; '.join(f)}" for r, f in con_fallos.items()]
+        avisos += [f"enlaza algo que no existe: {r}" for r in rotas[:5]]
+        return ("\n⚠️ Ojo, no todo pasó la comprobación:\n" + "\n".join(f"  • {a}" for a in avisos)
+                if avisos else "")
+
     # ── Flujo con perfil de plataforma ───────────────────────────────────────
     def _generar_proyecto_con_perfil(self, perfil: Dict[str, Any],
                                        peticion: str,
                                        descripcion_imagen: str = "") -> None:
         try:
+            t = trabajo.actual()
+            t.plan(["Entender lo que pides", "Planificar los archivos",
+                    "Escribir cada archivo", "Empaquetarlo y entregártelo"])
+            t.etapa(0)
             spec_completa = peticion
             if descripcion_imagen:
                 spec_completa += f"\n\nBOCETO/IMAGEN ANALIZADA:\n{descripcion_imagen}"
@@ -5895,25 +6598,25 @@ class WhatsAppAPI:
 
             # 1. Planificar módulos vía LLM
             prompt_plan = perfil["planner_prompt"].format(spec=spec_completa)
-            try:
-                plan_json = self._generar_codigo(prompt_plan, max_tokens=900).strip()
-                plan_json = re.sub(r"```json|```", "", plan_json).strip()
-                plan = json.loads(plan_json)
-            except Exception as e:
-                self._notificar_canal(f"✗ No pude planificar el proyecto ({perfil['id']}): {e}")
-                return
-
-            if not isinstance(plan, list) or not plan:
-                self._notificar_canal("✗ El planificador no devolvió módulos válidos.")
+            plan = self._plan_de_proyecto(prompt_plan, 900)
+            if not plan:
+                self._notificar_canal(f"✗ No pude planificar el proyecto ({perfil['id']}): "
+                                      "dos veces sin un plan que se pudiera leer.")
+                t.terminar("No pude planificar el proyecto", ok=False)
                 return
 
             max_mods = perfil.get("max_modulos", 10)
-            plan = plan[:max_mods]
+            plan = self._sin_binarias(plan, t)[:max_mods]
+            from . import piezas
+            plan = piezas.orden_de_escritura(plan, peticion)   # que vean el código ya escrito
 
             self._notificar_canal(
                 f"📋 Plan ({len(plan)} módulos):\n"
                 + "\n".join(f"  • {a.get('ruta','?')}" for a in plan)
             )
+            t.etapa(1)
+            t.paso(f"Plan de {len(plan)} archivos para «{perfil['nombre']}»",
+                   detalle="\n".join(a.get("ruta", "?") for a in plan))
 
             # 2. Carpeta del proyecto
             nombre_proyecto = re.sub(r"[^\w]", "_",
@@ -5921,6 +6624,7 @@ class WhatsAppAPI:
             ts = int(time.time())
             base_dir = PROYECTOS_DIR / f"{nombre_proyecto}_{ts}"
             base_dir.mkdir(parents=True, exist_ok=True)
+            t.fijar_carpeta(base_dir)
             for carpeta in perfil.get("carpetas", []):
                 (base_dir / carpeta).mkdir(parents=True, exist_ok=True)
 
@@ -5935,10 +6639,28 @@ class WhatsAppAPI:
                 full.write_text(contenido_meta, encoding="utf-8")
 
             # 4. Generar cada módulo planificado
+            from . import piezas
             refs_modulo  = perfil.get("refs_modulo", "")
             convenciones = perfil.get("convenciones", "")
+            t.etapa(2)
+            vista = ""
+            fallidos = 0
+            con_fallos: Dict[str, List[str]] = {}
+            escritos: Dict[str, str] = {}
+            prompts: Dict[str, str] = {}
             for i, arch in enumerate(plan):
-                ruta_rel = (arch.get("ruta") or f"modulo_{i}.txt").lstrip("/")
+                if t.parar_pedido():
+                    self._notificar_canal(f"⏹ Paro: llevo {i} de {len(plan)} archivos.")
+                    t.terminar(f"Parado por ti con {i} de {len(plan)} archivos hechos", parado=True)
+                    return
+                ruta = arch.get("ruta") or f"modulo_{i}.txt"
+                try:
+                    # La barra inicial se perdona, como siempre: «/src/x.luau» es src/x.luau.
+                    ruta_rel = _ruta_del_plan(base_dir, ruta.lstrip("/") if isinstance(ruta, str) else ruta)
+                except ValueError as e:
+                    t.comprobacion(f"Ruta no válida: {ruta}", False, motivo=str(e))
+                    fallidos += 1
+                    continue
                 descripcion = arch.get("descripcion", "")
                 tipo = arch.get("tipo", "")
                 self._notificar_canal(f"▸ Generando {ruta_rel}...")
@@ -5955,18 +6677,40 @@ class WhatsAppAPI:
                     + f"\nAhora genera SOLO el contenido completo del archivo: {ruta_rel}\n"
                     + f"Descripción: {descripcion}\n"
                     + (f"Tipo: {tipo}\n" if tipo else "")
+                    + f"\n{piezas.reglas_para(ruta_rel)}\n"
                     + "\nResponde SOLO el contenido del archivo, sin markdown ni explicaciones."
                 )
+                prompts[ruta_rel] = prompt_arch
+                _ya = piezas.contexto(ruta_rel, escritos, (a.get("ruta", "") for a in plan))
+                if _ya:
+                    prompt_arch += "\n\n" + _ya
                 try:
-                    contenido = self._limpiar_codigo(
-                        self._generar_codigo(prompt_arch, max_tokens=2500)
-                    )
+                    contenido, _fallos = self._escribir_pieza(t, prompt_arch, ruta_rel)
+                    if _fallos:
+                        con_fallos[ruta_rel] = _fallos
                 except Exception as e:
                     contenido = f"# Error generando este archivo: {e}\n"
+                    # Al panel, como lo que es: no «Escribo index.html (2 líneas)».
+                    t.comprobacion(f"Escribir {ruta_rel}", False, motivo=str(e))
+                    fallidos += 1
 
                 full = base_dir / ruta_rel
                 full.parent.mkdir(parents=True, exist_ok=True)
                 full.write_text(contenido, encoding="utf-8")
+                if contenido.startswith("# Error generando este archivo"):
+                    continue
+                escritos[ruta_rel] = contenido
+                t.archivo(ruta_rel, lineas=contenido.count("\n") + 1)
+                # La vista previa: el primer index.html que se abre tal cual, y se
+                # vuelve a avisar con cada pieza que la cambia (estilos, scripts).
+                if (not vista and ruta_rel.lower().endswith("index.html")
+                        and trabajo.se_puede_previsualizar(contenido)):
+                    vista = ruta_rel
+                if vista and ruta_rel.lower().endswith(trabajo.ACTUALIZAN_LA_VISTA):
+                    t.vista_previa(vista)
+
+            self._casar_piezas(t, base_dir, escritos, prompts, con_fallos)
+            self._probar_proyecto(t, base_dir, escritos, prompts, con_fallos)
 
             # 5. bootstrap_extra (ej. WorldBuilder de Roblox)
             for extra in perfil.get("bootstrap_extra", []):
@@ -5983,6 +6727,7 @@ class WhatsAppAPI:
                 full = base_dir / extra["ruta"]
                 full.parent.mkdir(parents=True, exist_ok=True)
                 full.write_text(extra_code, encoding="utf-8")
+                t.archivo(extra["ruta"], lineas=extra_code.count("\n") + 1)
 
             # 6. README + .gitignore
             try:
@@ -5996,6 +6741,7 @@ class WhatsAppAPI:
                 (base_dir / ".gitignore").write_text(gitignore, encoding="utf-8")
 
             # 7. Empaquetar
+            t.etapa(3)
             import zipfile
             zip_path = PROYECTOS_DIR / f"{nombre_proyecto}_{ts}.zip"
             with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -6006,12 +6752,19 @@ class WhatsAppAPI:
             size_kb = zip_path.stat().st_size // 1024
             n_extras = len(perfil.get("archivos_meta", {})) + len(perfil.get("bootstrap_extra", [])) + 1  # +README
             instrucciones = perfil.get("instrucciones_finales", "Te lo mando como ZIP ahora.")
+            avisos = self._avisos_de_piezas(t, base_dir, con_fallos)
             self._notificar_canal(
-                f"✓ Proyecto {perfil['nombre']} listo: {len(plan) + n_extras} archivos, {size_kb}KB.\n"
-                f"{instrucciones}"
+                f"{'✓' if not avisos else '◐'} Proyecto {perfil['nombre']}: "
+                f"{len(plan) + n_extras} archivos, {size_kb}KB.\n"
+                f"{instrucciones}{avisos}"
             )
             self._enviar_archivo_proactivo(str(zip_path), "application/zip")
+            if fallidos:
+                t.terminar(f"A medias: {fallidos} de {len(plan)} archivos no salieron", ok=False)
+            else:
+                t.terminar(f"Proyecto {perfil['nombre']} listo: {len(plan) + n_extras} archivos")
         except Exception as e:
+            trabajo.actual().terminar(f"Error generando el proyecto: {e}", ok=False)
             self._notificar_canal(f"✗ Error generando proyecto {perfil['id']}: {e}")
             self._reg_error(f"WhatsAppAPI._generar_proyecto_con_perfil[{perfil['id']}]",
                               "generador_proyecto_fail", str(e),
@@ -6021,6 +6774,10 @@ class WhatsAppAPI:
     def _generar_proyecto_generico(self, peticion: str,
                                      descripcion_imagen: str = "") -> None:
         try:
+            t = trabajo.actual()
+            t.plan(["Entender lo que pides", "Planificar los archivos",
+                    "Escribir cada archivo", "Empaquetarlo y entregártelo"])
+            t.etapa(0)
             spec_completa = peticion
             if descripcion_imagen:
                 spec_completa += f"\n\nBOCETO/IMAGEN ANALIZADA:\n{descripcion_imagen}"
@@ -6037,33 +6794,62 @@ class WhatsAppAPI:
                 "- Máximo 12 archivos\n"
                 "- Usa rutas relativas con carpetas si tiene sentido\n"
                 "- Incluye un README.md explicando cómo usar el proyecto\n"
+                "- Sin imágenes ni archivos binarios (.jpg, .png, fuentes…): sólo texto\n"
+                # Cuentas-viaje (11 oct 2026): en un fichero salió bien dos veces; partido
+                # en módulos, las cuatro veces no arrancó (las piezas no encajaban).
+                "- Si es un programa o script (no una web) que cabe en un fichero de unas "
+                "400 líneas, un solo fichero de código más sus pruebas y el README: cada "
+                "módulo de más es un sitio más donde las piezas no encajan\n"
                 "Responde SOLO el JSON, sin markdown ni explicaciones."
             )
-            try:
-                plan_json = self._generar_codigo(prompt_plan, max_tokens=800).strip()
-                plan_json = re.sub(r"```json|```", "", plan_json).strip()
-                plan = json.loads(plan_json)
-            except Exception as e:
-                self._notificar_canal(f"✗ No pude planificar el proyecto: {e}")
+            plan = self._plan_de_proyecto(prompt_plan, 800)
+            if not plan:
+                self._notificar_canal("✗ No pude planificar el proyecto: dos veces sin un "
+                                      "plan que se pudiera leer.")
+                t.terminar("No pude planificar el proyecto", ok=False)
                 return
-
-            if not isinstance(plan, list) or not plan:
-                self._notificar_canal("✗ El planificador no devolvió archivos válidos.")
+            plan = self._sin_binarias(plan, t)
+            from . import piezas
+            plan = piezas.orden_de_escritura(plan[:12], peticion) + plan[12:]   # tras el código
+            if not plan:
+                self._notificar_canal("✗ El plan sólo traía imágenes o binarios.")
+                t.terminar("El plan no tenía archivos de texto", ok=False)
                 return
 
             self._notificar_canal(
                 f"📋 Plan ({len(plan)} archivos):\n"
                 + "\n".join(f"  • {a['ruta']}" for a in plan[:12])
             )
+            t.etapa(1)
+            t.paso(f"Plan de {len(plan[:12])} archivos",
+                   detalle="\n".join(a.get("ruta", "?") for a in plan[:12]))
 
             nombre_proyecto = re.sub(r"[^\w]", "_",
                                        peticion[:40].lower()).strip("_") or "proyecto"
             ts = int(time.time())
             base_dir = PROYECTOS_DIR / f"{nombre_proyecto}_{ts}"
             base_dir.mkdir(parents=True, exist_ok=True)
+            t.fijar_carpeta(base_dir)
+            t.etapa(2)
+            vista = ""
+            fallidos = 0
+            con_fallos: Dict[str, List[str]] = {}
+            escritos: Dict[str, str] = {}
+            prompts: Dict[str, str] = {}
+            from . import piezas
 
             for i, arch in enumerate(plan[:12]):
-                ruta_rel = arch.get("ruta", f"archivo_{i}.txt")
+                if t.parar_pedido():
+                    self._notificar_canal(f"⏹ Paro: llevo {i} de {len(plan[:12])} archivos.")
+                    t.terminar(f"Parado por ti con {i} de {len(plan[:12])} archivos hechos", parado=True)
+                    return
+                ruta = arch.get("ruta", f"archivo_{i}.txt")
+                try:
+                    ruta_rel = _ruta_del_plan(base_dir, ruta)
+                except ValueError as e:
+                    t.comprobacion(f"Ruta no válida: {ruta}", False, motivo=str(e))
+                    fallidos += 1
+                    continue
                 descripcion = arch.get("descripcion", "")
                 self._notificar_canal(f"▸ Generando {ruta_rel}...")
 
@@ -6073,20 +6859,41 @@ class WhatsAppAPI:
                     f"Estructura del proyecto:\n"
                     + "\n".join(f"- {a['ruta']}: {a.get('descripcion','')}" for a in plan)
                     + f"\n\nAhora genera SOLO el contenido completo del archivo: {ruta_rel}\n"
-                    + f"({descripcion})\n\n"
+                    + f"({descripcion})\n\n{piezas.reglas_para(ruta_rel)}\n\n"
                     "Responde SOLO con el contenido del archivo, sin markdown."
                 )
+                prompts[ruta_rel] = prompt_arch
+                _ya = piezas.contexto(ruta_rel, escritos, (a.get("ruta", "") for a in plan[:12]))
+                if _ya:
+                    prompt_arch += "\n\n" + _ya
                 try:
-                    contenido = self._limpiar_codigo(
-                        self._generar_codigo(prompt_arch, max_tokens=2500)
-                    )
+                    contenido, _fallos = self._escribir_pieza(t, prompt_arch, ruta_rel)
+                    if _fallos:
+                        con_fallos[ruta_rel] = _fallos
                 except Exception as e:
                     contenido = f"# Error generando este archivo: {e}\n"
+                    # Al panel, como lo que es: no «Escribo index.html (2 líneas)».
+                    t.comprobacion(f"Escribir {ruta_rel}", False, motivo=str(e))
+                    fallidos += 1
 
                 full = base_dir / ruta_rel
                 full.parent.mkdir(parents=True, exist_ok=True)
                 full.write_text(contenido, encoding="utf-8")
+                if contenido.startswith("# Error generando este archivo"):
+                    continue
+                escritos[ruta_rel] = contenido
+                t.archivo(ruta_rel, lineas=contenido.count("\n") + 1)
+                # La vista previa: el primer index.html que se abre tal cual, y se
+                # vuelve a avisar con cada pieza que la cambia (estilos, scripts).
+                if (not vista and ruta_rel.lower().endswith("index.html")
+                        and trabajo.se_puede_previsualizar(contenido)):
+                    vista = ruta_rel
+                if vista and ruta_rel.lower().endswith(trabajo.ACTUALIZAN_LA_VISTA):
+                    t.vista_previa(vista)
 
+            self._casar_piezas(t, base_dir, escritos, prompts, con_fallos)
+            self._probar_proyecto(t, base_dir, escritos, prompts, con_fallos)
+            t.etapa(3)
             import zipfile
             zip_path = PROYECTOS_DIR / f"{nombre_proyecto}_{ts}.zip"
             with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -6095,16 +6902,169 @@ class WhatsAppAPI:
                         zf.write(f, f.relative_to(base_dir.parent))
 
             size_kb = zip_path.stat().st_size // 1024
+            avisos = self._avisos_de_piezas(t, base_dir, con_fallos)
             self._notificar_canal(
-                f"✓ Proyecto listo: {len(plan)} archivos, {size_kb}KB.\n"
-                "Te lo mando como ZIP ahora."
+                f"{'✓ Proyecto listo' if not avisos else '◐ Proyecto hecho'}: "
+                f"{len(plan[:12])} archivos, {size_kb}KB.\n"
+                f"Te lo mando como ZIP ahora.{avisos}"
             )
             self._enviar_archivo_proactivo(str(zip_path), "application/zip")
+            if fallidos:
+                t.terminar(f"A medias: {fallidos} de {len(plan[:12])} archivos no salieron", ok=False)
+            else:
+                t.terminar(f"Proyecto listo: {len(plan[:12])} archivos")
         except Exception as e:
+            trabajo.actual().terminar(f"Error generando el proyecto: {e}", ok=False)
             self._notificar_canal(f"✗ Error generando proyecto: {e}")
             self._reg_error("WhatsAppAPI._generar_proyecto_generico",
                               "generador_generico_fail", str(e),
                               "proyecto genérico abortado")
+
+    # ── Un proyecto que ya existe (proyecto_existente.py) ────────────────────
+    MAX_FICHEROS_A_CAMBIAR = 8
+    MAX_CODIGO_A_LA_VISTA = 40000      # caracteres de código que se enseñan enteros
+
+    def _modificar_proyecto(self, zip_path: str, peticion: str) -> None:
+        """Cambia el proyecto que Enzo pasa como ZIP: lo abre, decide qué ficheros
+        tocar, los reescribe cambiando sólo lo necesario, comprueba que encajen, pasa
+        TODAS sus pruebas en la caja (las que ya tenía también: así se ve si rompe lo
+        que funcionaba) y lo devuelve como ZIP. Examen de nivel, 11 oct 2026
+        (arreglar-citas): contestaba «descomprime el zip y pégame el contenido»."""
+        from . import piezas, proyecto_existente as pe
+        try:
+            t = trabajo.actual()
+            t.plan(["Abrir tu proyecto", "Ver qué hay que cambiar", "Cambiar los archivos",
+                    "Probarlo y devolvértelo"])
+            t.etapa(0)
+            ts = int(time.time())
+            base_dir = PROYECTOS_DIR / f"proyecto_{ts}"
+            base_dir.mkdir(parents=True, exist_ok=True)
+            try:
+                nombre, extraidos = pe.extraer(Path(zip_path), base_dir)
+            except pe.ProyectoMalo as e:
+                self._notificar_canal(f"✗ No pude abrir tu proyecto: {e}.")
+                t.terminar(f"No pude abrir el ZIP: {e}", ok=False)
+                return
+            t.fijar_carpeta(base_dir)
+            antes = pe.leer(base_dir)
+            t.paso(f"Abierto «{nombre}»: {len(extraidos)} archivos", detalle=pe.arbol(antes))
+            t.etapa(1)
+
+            codigo = {r: c for r, c in antes.items() if Path(r).suffix.lower() in pe.EXT_CODIGO}
+            if sum(len(c) for c in codigo.values()) <= self.MAX_CODIGO_A_LA_VISTA:
+                vista = "\n\n".join(f"--- {r} ---\n{c.rstrip()}" for r, c in sorted(codigo.items()))
+            else:                               # grande: lo que ofrece cada fichero
+                vista = "\n\n".join(f"# {r}\n{piezas.interfaz(r, c)}"
+                                     for r, c in sorted(codigo.items()) if piezas.interfaz(r, c))
+            leeme = next((c for r, c in antes.items() if Path(r).name.lower() == "readme.md"), "")
+            prompt_plan = (
+                "Tengo un proyecto que YA EXISTE y me piden cambiarlo.\n"
+                f"PETICIÓN: {peticion}\n\n"
+                f"ARCHIVOS:\n{pe.arbol(antes)}\n\n"
+                + (f"README:\n{leeme[:3000]}\n\n" if leeme else "")
+                + f"CÓDIGO:\n{vista}\n\n"
+                "Lista los archivos que hay que cambiar o crear para hacer EXACTAMENTE lo que "
+                "se pide, en formato JSON:\n"
+                '[{"ruta": "ruta/archivo.ext", "cambio": "qué cambiar ahí y por qué, '
+                'concreto"}]\n'
+                "Reglas:\n"
+                "- Sólo los archivos que de verdad hay que tocar: lo demás se queda como está.\n"
+                "- Busca dónde NACE cada fallo (puede estar en un archivo distinto del que lo "
+                "muestra) y arréglalo ahí; si otra parte usa esa misma lógica, también.\n"
+                "- Si el proyecto tiene pruebas, añade las de lo nuevo y de los fallos "
+                "arreglados.\n"
+                f"- Máximo {self.MAX_FICHEROS_A_CAMBIAR} archivos, con las mismas rutas que "
+                "arriba para los que ya existen.\n"
+                "Responde SOLO el JSON, sin markdown ni explicaciones."
+            )
+            plan = self._plan_de_proyecto(prompt_plan, 1500)
+            if not plan:
+                self._notificar_canal("✗ No supe qué cambiar en tu proyecto: dos veces sin un "
+                                      "plan que se pudiera leer.")
+                t.terminar("No pude planificar los cambios", ok=False)
+                return
+            plan = piezas.orden_de_escritura(
+                self._sin_binarias(plan, t)[:self.MAX_FICHEROS_A_CAMBIAR], peticion)
+            lista_plan = "\n".join(f"- {a.get('ruta', '?')}: {a.get('cambio') or a.get('descripcion', '')}"
+                                   for a in plan)
+            t.paso(f"Voy a tocar {len(plan)} archivos", detalle=lista_plan)
+            t.etapa(2)
+
+            escritos = dict(antes)
+            prompts: Dict[str, str] = {}
+            con_fallos: Dict[str, List[str]] = {}
+            for arch in plan:
+                if t.parar_pedido():
+                    self._notificar_canal("⏹ Paro: tu proyecto se queda como estaba.")
+                    t.terminar("Parado por ti", parado=True)
+                    return
+                try:
+                    ruta_rel = _ruta_del_plan(base_dir, arch.get("ruta", ""))
+                except ValueError as e:
+                    t.comprobacion(f"Ruta no válida: {arch.get('ruta', '?')}", False, motivo=str(e))
+                    continue
+                cambio = arch.get("cambio") or arch.get("descripcion") or ""
+                actual = escritos.get(ruta_rel)
+                prompt = (
+                    "Proyecto que ya existe. "
+                    f"PETICIÓN: {peticion}\n\nPlan de cambios:\n{lista_plan}\n\n"
+                    + (f"Ahora cambia {ruta_rel}: {cambio}\n\n"
+                       f"CONTENIDO ACTUAL DE {ruta_rel}:\n<<<\n{actual}\n>>>\n\n"
+                       "Al cambiar un archivo que ya existe:\n"
+                       "- Cambia SÓLO lo necesario para la petición; el resto, tal cual "
+                       "(nombres, mensajes, formato, comentarios, orden).\n"
+                       "- No cambies cómo funciona lo que no se pide: mismos mensajes y "
+                       "salidas.\n"
+                       "- Escribe el archivo ENTERO ya cambiado, no sólo los trozos.\n"
+                       if actual is not None else
+                       f"Ahora crea {ruta_rel}: {cambio}\n"
+                       "Sigue el estilo del proyecto (nombres, idioma, forma de las pruebas).\n")
+                    + f"\n{piezas.reglas_para(ruta_rel)}\n\n"
+                    "Responde SOLO con el contenido del archivo, sin markdown."
+                )
+                prompts[ruta_rel] = prompt
+                otros = {k: v for k, v in escritos.items() if k != ruta_rel}
+                ya = piezas.contexto(ruta_rel, otros, codigo_entero=True)
+                try:
+                    contenido, fallos = self._escribir_pieza(
+                        t, prompt + ("\n\n" + ya if ya else ""), ruta_rel)
+                except Exception as e:          # se queda como estaba
+                    t.comprobacion(f"Cambiar {ruta_rel}", False, motivo=str(e))
+                    continue
+                if not contenido.strip():
+                    continue
+                if fallos:
+                    con_fallos[ruta_rel] = fallos
+                full = base_dir / ruta_rel
+                full.parent.mkdir(parents=True, exist_ok=True)
+                full.write_text(contenido if contenido.endswith("\n") else contenido + "\n",
+                                encoding="utf-8")
+                escritos[ruta_rel] = full.read_text(encoding="utf-8")
+                t.archivo(ruta_rel, lineas=contenido.count("\n") + 1)
+
+            self._casar_piezas(t, base_dir, escritos, prompts, con_fallos)
+            self._probar_proyecto(t, base_dir, escritos, prompts, con_fallos)
+            t.etapa(3)
+            import zipfile
+            zip_salida = PROYECTOS_DIR / f"{nombre}_cambiado_{ts}.zip"
+            with zipfile.ZipFile(zip_salida, "w", zipfile.ZIP_DEFLATED) as zf:
+                for f in sorted(base_dir.rglob("*")):
+                    if f.is_file() and "__pycache__" not in f.parts:
+                        zf.write(f, Path(nombre) / f.relative_to(base_dir))
+            cambios = pe.resumen(antes, escritos)
+            avisos = self._avisos_de_piezas(t, base_dir, con_fallos)
+            self._notificar_canal(
+                f"{'✓ Tu proyecto, cambiado' if not avisos else '◐ Tu proyecto, cambiado a medias'}"
+                f" ({len(cambios)} archivo{'s' if len(cambios) != 1 else ''}):\n"
+                + ("\n".join(f"  • {c}" for c in cambios) or "  (no hizo falta cambiar nada)")
+                + f"\nTe lo mando como ZIP ahora.{avisos}")
+            self._enviar_archivo_proactivo(str(zip_salida), "application/zip")
+            t.terminar(f"Proyecto cambiado: {len(cambios)} archivos", ok=not avisos)
+        except Exception as e:
+            trabajo.actual().terminar(f"Error cambiando el proyecto: {e}", ok=False)
+            self._notificar_canal(f"✗ Error cambiando tu proyecto: {e}")
+            self._reg_error("WhatsAppAPI._modificar_proyecto", "modificar_proyecto_fail",
+                            str(e), "cambio de proyecto abortado")
 
     def _obtener_agente(self) -> "AgenteAutonomo":
         if self._agente is None:
@@ -6249,11 +7209,9 @@ class WhatsAppAPI:
             return tools.crear_documento(tema=tema, formato=formato, contenido=contenido)
 
         # ── Caso 4: formato totalmente desconocido → aprender en background ──
-        threading.Thread(
-            target=self._aprender_y_generar_archivo,
-            args=(tema, formato, contenido),
-            daemon=True,
-        ).start()
+        trabajo.lanzar(self._aprender_y_generar_archivo, tema, formato, contenido,
+                       titulo=f"Crear un archivo .{formato}", hilo=self.orch.hilo_actual,
+                       nombre_hilo="archivo-formato")
         return (f"No tengo soporte directo para formato '{formato}'. "
                 f"Lo voy a aprender ahora mismo, dame unos minutos.")
 
@@ -6271,9 +7229,11 @@ class WhatsAppAPI:
             f"instálala con: subprocess.run(['pip3','install','--break-system-packages','<libreria>'])\n"
             f"Al terminar, imprime la ruta del archivo."
         )
+        t = trabajo.actual()
         try:
             resultado = self._aprender_habilidad(tarea, guardar=False)
             if resultado.startswith("✓") and Path(ruta_out).exists():
+                t.terminar(f"Archivo .{formato} listo")
                 mimes = {
                     "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
@@ -6285,10 +7245,13 @@ class WhatsAppAPI:
                 self._notificar_canal(f"✓ Documento {formato.upper()} listo: {ruta_out}")
                 self._enviar_archivo_proactivo(ruta_out, mime)
             else:
+                t.terminar(f"No pude crear el archivo .{formato}: {resultado.lstrip('✗ ')[:150]}",
+                           ok=False, parado=t.parar_pedido())
                 self._notificar_canal(
                     f"No pude crear el archivo .{formato}: {resultado[:200]}"
                 )
         except Exception as e:
+            t.terminar(f"Error generando archivo .{formato}: {e}", ok=False)
             self._notificar_canal(f"Error generando archivo .{formato}: {e}")
 
     def _enviar_archivo_proactivo(self, ruta: str, mime: str) -> None:
@@ -6346,12 +7309,18 @@ class WhatsAppAPI:
             return True
         # El «no» también se recuerda un rato: sin servidor local se volvía a
         # preguntar en cada /estado y cada uno pagaba 2 s (portátil, 3 oct 2026).
+        # Y al caducar el minuto, otra vez 2 s: ahora se mira antes si hay
+        # alguien en el puerto (connectivity.escucha, 0,3 s como mucho).
         if (self._vision_ok is False
                 and time.time() < getattr(self, "_vision_no_hasta", 0.0)):
             return False
+        from .connectivity import escucha
         try:
-            with urllib.request.urlopen(self.VISION_URL + "/health", timeout=2) as r:
-                self._vision_ok = (r.status == 200)
+            if not escucha(self.VISION_URL):
+                self._vision_ok = False
+            else:
+                with urllib.request.urlopen(self.VISION_URL + "/health", timeout=2) as r:
+                    self._vision_ok = (r.status == 200)
         except Exception:
             self._vision_ok = False
         if self._vision_ok is False:
@@ -6544,8 +7513,10 @@ class WhatsAppAPI:
         gem_key = self.orch.config.GEMINI_API_KEY
         if gem_key:
             try:
-                from celestia_lib.jugador import (_preguntar_a_ojo,
-                                                  GEMINI_VISION_URL)
+                # De ojo_nube y no de jugador: el jugador no va en la
+                # versión pública y ver fotos sí.
+                from celestia_lib.ojo_nube import (_preguntar_a_ojo,
+                                                   GEMINI_VISION_URL)
                 # 27 sep 2026: con 400 tokens y el pensamiento encendido, la
                 # descripción de un tatuaje fue «La imagen muestra un tatuaje a
                 # color en el brazo de una persona, que» — cortada, porque
@@ -6774,19 +7745,76 @@ class WhatsAppAPI:
         # habría que quitarla (o mirar `X-Forwarded-For`).
         LOOPBACK = {"127.0.0.1", "::1", "localhost"}
 
+        # Pero 127.0.0.1 es también lo que se abre en el navegador del aparato
+        # (revisión final del panel «Trabajando», 5 oct), y eso de arriba se
+        # fía sin llave: podía mandar /mensaje o /apagar.
+        # · La vista previa del panel: código que escribe el modelo y corre
+        #   encerrado (sandbox, origen «null»).
+        # · Cualquier otra web: `fetch("http://127.0.0.1:8765/mensaje",
+        #   {method: "POST", body: …})` con cuerpo text/plain no lleva
+        #   preflight de CORS; la web no lee la respuesta, pero Celestia actúa.
+        # El navegador firma con su `Origin` lo que manda una web, y sin llave
+        # sólo vale el propio chat (y las apps, que lo cargan tal cual). Lo que
+        # viene de otro sitio sin `Origin` (una imagen, un script, navegar la
+        # caja) lo delata `Sec-Fetch-*`. Sin nada de eso (hablar.py, los
+        # widgets, los puentes), como siempre. La vista previa sí puede pedir
+        # sus propios archivos. Y el dueño desde la web de GitHub llega por la
+        # puerta pública sin la llave (la puerta la quita), pero marcado por
+        # ella tras mirarla; que una web diga ser la de GitHub no basta: ahí
+        # Celestia puede publicar páginas que escribe el modelo.
+        VISTA_RE = re.compile(r"^/trabajos/\d{14}[0-9a-f]{6}/vista/")
+        NOMBRES_PROPIOS = ("127.0.0.1", "localhost", "[::1]")
+        from . import web_publica
+
+        def _desde_otra_web() -> bool:
+            if flask_request.method in ("GET", "HEAD") and VISTA_RE.match(flask_request.path or ""):
+                return False
+            cab = flask_request.headers
+            if web_publica.de_la_puerta(cab):
+                return False
+            origen = cab.get("Origin")
+            propios = {f"http://{h}:{self.puerto}" for h in NOMBRES_PROPIOS}
+            if origen and origen not in propios:
+                return True                 # una web ajena, o «null» (la caja)
+            return (cab.get("Sec-Fetch-Site") == "cross-site"
+                    and cab.get("Sec-Fetch-Mode", "cors") != "cors")
+
+        # Y una web con un nombre que apunta al aparato (DNS rebinding, 5 oct):
+        # `http://malvada.example:8765` cambia su DNS a 127.0.0.1 y pide a «su
+        # propio origen». En un GET así el navegador no manda `Origin` y
+        # `Sec-Fetch-Site` dice same-origin: pasaba sin llave y además leía la
+        # respuesta (/hilos, /trabajos, la vista previa…). Lo que no puede
+        # disimular es el `Host`, que lleva su nombre. Los nuestros usan
+        # 127.0.0.1 o localhost: el chat y las apps, hablar.py y los puentes
+        # (CELESTIA_API_URL), y la puerta pública, que quita el Host de fuera y
+        # urllib pone el de `api_privada`. Sin Host (ningún navegador lo omite),
+        # como siempre.
+        def _nombre_ajeno() -> bool:
+            host = (flask_request.headers.get("Host") or "").strip().lower()
+            if not host:
+                return False
+            propios = set(NOMBRES_PROPIOS) | {f"{h}:{self.puerto}" for h in NOMBRES_PROPIOS}
+            return host not in propios
+
         @app.before_request
         def _verificar_token_y_rate():
             ruta = flask_request.path or "/"
             # Token check
             token = self.orch.config.API_TOKEN
             desde_aqui = (flask_request.remote_addr or "") in LOOPBACK
+            if desde_aqui and ruta not in RUTAS_ABIERTAS and (_nombre_ajeno() or _desde_otra_web()):
+                import secrets as _sec
+                recibido = flask_request.headers.get("X-Celestia-Token", "")
+                if not (token and _sec.compare_digest(recibido, token)):
+                    return jsonify({"error": "forbidden"}), 403
             if token and not desde_aqui and ruta not in RUTAS_ABIERTAS:
                 recibido = flask_request.headers.get("X-Celestia-Token", "")
                 import secrets as _sec
                 if not _sec.compare_digest(recibido, token):
                     return jsonify({"error": "unauthorized"}), 401
             # Rate limit
-            if ruta in RATE_EXENTOS:
+            # El panel «Trabajando» pregunta cada ~0,7 s mientras dura un encargo.
+            if ruta in RATE_EXENTOS or ruta.startswith("/trabajos"):
                 return None
             ip = flask_request.remote_addr or "?"
             max_req, ventana = RATE_STRICT.get(ruta, RATE_DEFAULT)
@@ -6846,7 +7874,7 @@ class WhatsAppAPI:
         from .blueprints import (
             bp_core, bp_causal, bp_predictor, bp_razonar, bp_grafo, bp_abstraer,
             bp_aprendizaje, bp_plan, bp_conversacion, bp_canales, bp_chat,
-            bp_espacio, bp_actualizar, bp_escritorio,
+            bp_espacio, bp_actualizar, bp_escritorio, bp_trabajos,
         )
         app.register_blueprint(bp_core.crear(self))
         app.register_blueprint(bp_canales.crear(self))
@@ -6862,6 +7890,7 @@ class WhatsAppAPI:
         app.register_blueprint(bp_espacio.crear(self))
         app.register_blueprint(bp_actualizar.crear(self))
         app.register_blueprint(bp_escritorio.crear(self))
+        app.register_blueprint(bp_trabajos.crear(self))
 
     # ── Auto-reflexión periódica (memoria a largo plazo activa) ──────────
     _REFLEXION_INTERVALO_S = 6 * 3600  # cada 6h
@@ -6967,22 +7996,23 @@ class WhatsAppAPI:
         # antes el banner decía «Visión ✓ via OpenRouter» con sólo la clave de
         # Groq, que hace tiempo que no ve.
         from celestia_lib import sentidos
-        print(f"\n  WhatsApp API lista en http://localhost:{self.puerto}")
+        # Groq y OpenRouter ya salen en «Pensar», y los puentes (WhatsApp,
+        # Telegram, Discord) se encienden desde el chat (canales.py): las
+        # líneas viejas «configura … en .env» y «node bridge.js» sobraban.
+        print(f"\n  Celestia lista en http://localhost:{self.puerto}")
         for s in sentidos.estado(self):
             print(f"  {s['nombre']:<12}: {'✓ ' + s['como'] if s['ok'] else '✗  ' + s['falta']}")
         print(f"  Watchdog    : ✓ activo (cada 5 min)")
-        print(f"  Reflexión   : ✓ activa (cada {self._REFLEXION_INTERVALO_S // 3600}h)")
-        cfg = self.orch.config
-        print(f"  Groq        : {'✓' if cfg.GROQ_API_KEY else '✗'} ({cfg.GROQ_MODEL})")
-        print(f"  OpenRouter  : {'✓ (fallback)' if cfg.OPENROUTER_API_KEY else '✗  configura OPENROUTER_API_KEY en .env'}")
-        print("  Inicia el bridge:  node whatsapp_bridge/bridge.js\n")
+        print(f"  Reflexión   : ✓ activa (cada {self._REFLEXION_INTERVALO_S // 3600}h)\n")
         host = self._preparar_acceso_en_red()
         # La web pública (enlace fijo en GitHub Pages): apagada salvo
         # CELESTIA_WEB_PUBLICA=1. En un hilo: abrir el túnel tarda hasta 60 s.
         from . import web_publica
         threading.Thread(target=web_publica.arrancar, args=(self.orch.model, self.puerto),
                          daemon=True, name="celestia-web-publica").start()
-        self.app.run(host=host, port=self.puerto, threaded=True)
+        # load_dotenv=False: el .env lo lee Celestia (config.py); Flask sólo
+        # soltaba «Install python-dotenv to use them» en cada arranque.
+        self.app.run(host=host, port=self.puerto, threaded=True, load_dotenv=False)
 
     def _preparar_acceso_en_red(self) -> str:
         """Decide dónde escuchar y, si es fuera de este aparato, pone la llave.

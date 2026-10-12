@@ -31,6 +31,8 @@ import json
 import logging
 import time
 import re
+
+from . import trabajo
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
@@ -73,6 +75,7 @@ class Evidencia:
 class Intento:
     evidencias: List[Evidencia] = field(default_factory=list)
     respuesta: str = ""
+    parado: bool = False           # «Parar» en el panel: se deja de buscar
 
     @property
     def hubo_suerte(self) -> bool:
@@ -99,12 +102,20 @@ _NEGATIVA_LEGITIMA_RE = re.compile(
     r"no\s+me\s+parece|eso\s+no\s+estar[íi]a\s+bien)", re.I)
 
 
+# Sólo cuenta cómo EMPIEZA (o la respuesta entera, si es corta). Examen de nivel,
+# 7 oct 2026: el correo de reclamación estaba escrito, con una salvedad sensata
+# al final («no puedo calcularte el importe exacto: depende de tu tarifa»), y ese
+# «no puedo» lo cambió entero por el informe del empeño («Lo que vi: …»).
+_ARRANQUE = 240
+_CORTA = 400
+
+
 def parece_rendicion(texto: str) -> bool:
     """¿Esta respuesta es un «no puedo» que quizá no había que dar?"""
     t = (texto or "").strip()
     if not t or _NEGATIVA_LEGITIMA_RE.search(t):
         return False
-    return bool(_RENDICION_RE.search(t))
+    return bool(_RENDICION_RE.search(t if len(t) <= _CORTA else t[:_ARRANQUE]))
 
 
 # ── «Sí» a lo que ella misma ofreció ────────────────────────────────────────
@@ -247,7 +258,10 @@ def intentar(texto_usuario: str,
     ya_pedidas: set = set()
 
     for paso in range(max_pasos):
-        if time.time() > limite:
+        if trabajo.actual().parar_pedido():
+            intento.parado = True
+            break
+        if time.time() >= limite:          # «>»: en Windows el reloj va a saltos de 15 ms
             logger.info("empeño: se acabó el tiempo tras %d paso(s)", paso)
             break
         try:
@@ -277,6 +291,9 @@ def intentar(texto_usuario: str,
         except Exception as e:
             resultado = f"(no salió: {e})"
             logger.info("empeño: %s falló: %s", nombre, e)
+            trabajo.actual().comprobacion(nombre, False, motivo=str(e))
+        trabajo.actual().paso(f"Uso {nombre}",
+                              detalle=f"{json.dumps(params, ensure_ascii=False, default=str)}\n\n{resultado}")
 
         recortado = _recortar(resultado)
         # La misma respuesta otra vez es dar vueltas aunque los parámetros

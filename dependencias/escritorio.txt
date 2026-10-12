@@ -12,7 +12,7 @@
 flask>=3.0,<4.0
 requests>=2.31
 numpy>=1.24
-cryptography>=42
+cryptography>=42,<45      # la misma que pyproject.toml
 argon2-cffi>=23.1
 
 # ── Documentos: crear PDF / Word, leer los que le mandas ──
@@ -27,7 +27,8 @@ scipy>=1.11        # el calco de fotos (lineas.py): tatuajes, dibujos
 
 # ── Voz (en línea) y avisos de la app ──
 edge-tts>=6.1
-pywebpush>=2.0
+pywebpush>=2.0,<2.4       # 2.4 pide cryptography>=47
+py-vapid>=1.9,<1.9.3
 
 # ── Buscar: varios buscadores a la vez, como el SearXNG del móvil ──
 # (el HTML de DuckDuckGo a solas da captcha a la tercera búsqueda seguida).

@@ -229,9 +229,10 @@ def crear(api) -> Blueprint:
         # ffmpeg disponible (necesario para TTS)
         import shutil as _sh
         checks["ffmpeg"] = bool(_sh.which("ffmpeg"))
-        # Conectividad a internet
+        # Conectividad a internet: lo último que se supo (mirar en el momento
+        # podían ser 9 s con la WiFi floja, y el lanzador espera a /estado).
         try:
-            checks["online"] = api.orch.connectivity.is_online()
+            checks["online"] = bool(api.orch.connectivity.is_online_sin_esperar())
         except Exception:
             checks["online"] = False
         # Disco libre en MEM_DIR (alerta si <500 MB)

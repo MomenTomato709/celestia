@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from . import __version__
-from .paths import MEM_DIR, ROOT
+from .paths import MEM_DIR, ROOT, hay_jugador
 from .reminders import ReminderManager
 from .resources import PLATAFORMA
 
@@ -250,6 +250,20 @@ _LIMPIA_BUSQUEDA_SUF_RE = re.compile(
     r"bing|yahoo|youtube|wikipedia)\s*$",
     re.I,
 )
+
+class _EncargoDeInvestigacion:
+    """La tabla de intenciones pide algo con `.search()`: esto envuelve
+    `investigacion.es_encargo`, que además mira el tamaño y las señales."""
+
+    def search(self, texto):
+        from .investigacion import es_encargo
+        if not es_encargo(texto):
+            return None
+        return re.match(r"[\s\S]*", texto)
+
+
+_PIDE_INVESTIGACION_RE = _EncargoDeInvestigacion()
+
 
 def _limpiar_query_busqueda(raw: str) -> str:
     """Limpia prefijos naturales y devuelve solo la query real."""
@@ -1238,7 +1252,8 @@ class AgentPlanner:
             r"(?:de\s+|sobre\s+|con\s+|que\s+(?:muestre|tenga)\s+)?(.+)",
             re.I | re.S),
          "generar_imagen",
-         lambda m: {"prompt": m.group(1).strip(" .?!"), **_tamano_imagen(m.string)},
+         lambda m: {"prompt": m.group(1).strip(" .?!"), **_tamano_imagen(m.string),
+                    "peticion": m.string.strip()},
          False,
          lambda p: f"Generar imagen: {p['prompt'][:60]}"),
 
@@ -1263,7 +1278,8 @@ class AgentPlanner:
             r"invitaci[oó]n|post|historia)\b.+)",
             re.I),
          "generar_imagen",
-         lambda m: {"prompt": m.group(1).strip(" .?!"), **_tamano_imagen(m.string)},
+         lambda m: {"prompt": m.group(1).strip(" .?!"), **_tamano_imagen(m.string),
+                    "peticion": m.string.strip()},
          False,
          lambda p: f"Generar diseño: {p['prompt'][:60]}"),
 
@@ -1743,6 +1759,19 @@ class AgentPlanner:
          True,
          lambda p: f"⚠ Borrar: {p['ruta']}"),
 
+        # Encargo de investigación: «hazme un informe largo con fuentes», «planéame un
+        # viaje de 5 días con precios reales». Antes iba al chat (tope de 512 tokens,
+        # una búsqueda con la frase entera) y acababa en «¿tiro con ello?» (examen de
+        # nivel, 6 oct 2026). Detrás de las herramientas concretas (un «informe en PDF»
+        # es un PDF; la domótica, los archivos…) y delante de las búsquedas genéricas:
+        # «informe largo con fuentes sobre las noticias de…» no es una lista de
+        # titulares, ni «…sobre el tiempo en Galicia este otoño», el parte.
+        (_PIDE_INVESTIGACION_RE,
+         "investigar",
+         lambda m: {"encargo": m.string.strip()},
+         False,
+         lambda p: f"Investigar: {p['encargo'][:60]}"),
+
         # Búsqueda web explícita (más genérico — siempre al final).
         # Sesión 32 (BUG-S136): formas naturales como «busca en el google que
         # has abierto noticias de X» no disparaban. Ahora limpiamos prefijos
@@ -1921,6 +1950,10 @@ class AgentPlanner:
         if self._META_RE.search(user_input):
             return None
         for pattern, tool, extractor, needs_confirm, desc_fn in self._P:
+            # Sin el saber de ZZZ (la versión pública no lo lleva), la pregunta
+            # sigue el camino de siempre: el modelo y la búsqueda.
+            if tool == "zzz" and not hay_jugador():
+                continue
             m = pattern.search(user_input)
             if m:
                 try:
@@ -2164,6 +2197,10 @@ def run_conversation(orch: Orchestrator):
 
             # ── Fase 2: detección de intención de herramienta ──
             intent = planner.detect(user)
+            # Un encargo de investigación sólo lo sabe llevar el servidor (segundo
+            # plano, panel, bandeja); aquí tools.execute no lo conoce: va a la charla.
+            if intent and intent["tool"] == "investigar":
+                intent = None
             if intent:
                 print(f"\n  → {intent['description']}")
                 if intent["needs_confirm"]:

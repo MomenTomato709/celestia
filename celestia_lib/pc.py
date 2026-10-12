@@ -46,6 +46,13 @@ _ALIAS = {"navegador": ["chrome", "edge", "firefox", "brave", "opera"],
           "powerpoint": ["microsoft powerpoint", "powerpoint"]}
 
 
+def _de_verdad() -> bool:
+    """En las pruebas no se abre, se cierra ni se toca el volumen de verdad: una
+    prueba de «fuera de Android» abrió WhatsApp en el portátil de Enzo (4 oct
+    2026). La prueba que quiera ver las órdenes sustituye ésta y las órdenes."""
+    return not os.environ.get("CELESTIA_EN_TESTS")
+
+
 def _norm(texto: str) -> str:
     t = unicodedata.normalize("NFKD", (texto or "").lower())
     t = "".join(c for c in t if not unicodedata.combining(c))
@@ -157,6 +164,8 @@ def abrir(nombre: str) -> str:
         return (f"No encuentro «{nombre}» entre los programas de este ordenador. "
                 "Dime el nombre tal como sale en el menú de programas.")
     bonito, como = hallado
+    if not _de_verdad():
+        return f"✅ Abriendo {bonito}."
     try:
         if sys.platform == "win32":
             os.startfile(como)                                     # noqa: S606
@@ -244,6 +253,8 @@ def _procesos_de(nombre: str) -> List[str]:
 
 
 def cerrar(nombre: str) -> str:
+    if not _de_verdad():
+        return f"✅ He cerrado {nombre}."
     if sys.platform == "darwin":
         hallado = buscar(nombre)
         app = Path(hallado[1]).stem if hallado else nombre
@@ -279,8 +290,12 @@ def volumen(accion: str) -> str:
     baja = a in ("down", "bajar", "baja", "menos")
     mute = a in ("mute", "silenciar", "silencio", "silenciado")
     nivel = re.match(r"(\d{1,3})%?$", a)
+    if not (sube or baja or mute or nivel):
+        return f"No entiendo «{accion}» para el volumen."
     try:
-        if sys.platform == "win32":
+        if not _de_verdad():
+            pass
+        elif sys.platform == "win32":
             import ctypes
             if sube:
                 codigo, veces = 0xAF, 5                  # VK_VOLUME_UP (≈2 % cada una)

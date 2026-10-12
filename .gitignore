@@ -116,6 +116,7 @@ bin/
 
 # ─── Examen: los informes de cada examen (la marca sí va en git) ─────
 examen/resultados/
+examen/nivel/pasadas/
 .aider*
 *.pyc
 
@@ -128,3 +129,6 @@ papeles/
 
 # ─── Lo que Celestia se instala sola en un PC (Node, etc.: complementos.py) ───
 complementos/
+
+# Espacio de trabajo de Superpowers (registros de los planes)
+.superpowers/

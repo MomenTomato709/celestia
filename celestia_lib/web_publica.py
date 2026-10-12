@@ -238,6 +238,17 @@ def arrancar(modelo, puerto_api: int = 8765, usuario: str = "Enzo") -> Optional[
         return None
 
 
+def de_la_puerta(cabeceras) -> bool:
+    """¿Lo reenvía la puerta encendida, que ya miró la llave del dueño? La API
+    lo pregunta porque por la puerta el dueño llega como 127.0.0.1, desde la
+    web de GitHub y sin la llave (la puerta la quita)."""
+    from .puerta_publica import MARCA
+    esperada = getattr(_encendida.get("puerta"), "marca", "")
+    recibida = cabeceras.get(MARCA) or ""
+    return bool(esperada and recibida) and secrets.compare_digest(
+        recibida.encode("utf-8"), esperada.encode("utf-8"))
+
+
 def parar() -> None:
     tunel = _encendida.pop("tunel", None)
     puerta = _encendida.pop("puerta", None)

@@ -296,3 +296,40 @@ class PresupuestoMensual:
                 "cupo_hoy": round(self.cupo_hoy(estado), 4),
                 "renueva": _mas_un_mes(date.fromisoformat(estado["inicio_ciclo"])).isoformat(),
             }
+
+
+# ── El gasto de una pasada del examen de nivel ───────────────────────────
+# El examen corta al llegar a 1 $ por pasada y apunta lo que cuesta cada
+# encargo, con DeepSeek o con OpenRouter. Con CELESTIA_GASTO_EXAMEN, cada
+# llamada de pago deja aquí una línea; sin la variable (la Celestia de
+# siempre) no se apunta nada.
+
+def apuntar_examen(proveedor: str, dolares) -> None:
+    ruta = os.environ.get("CELESTIA_GASTO_EXAMEN", "").strip()
+    try:
+        dolares = float(dolares or 0)
+    except (TypeError, ValueError):
+        return
+    if not ruta or dolares <= 0:
+        return
+    try:
+        with open(ruta, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"t": round(time.time(), 3), "proveedor": proveedor,
+                                "dolares": round(dolares, 6)}) + "\n")
+    except OSError as e:
+        logger.warning("Gasto del examen: no pude apuntarlo en %s (%s)", ruta, e)
+
+
+def gasto_examen(ruta) -> float:
+    """Lo apuntado hasta ahora. Una línea a medio escribir no cuenta."""
+    try:
+        lineas = Path(ruta).read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return 0.0
+    total = 0.0
+    for linea in lineas:
+        try:
+            total += float(json.loads(linea).get("dolares") or 0)
+        except (ValueError, TypeError, AttributeError):
+            continue
+    return round(total, 6)

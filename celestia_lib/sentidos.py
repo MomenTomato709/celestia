@@ -111,10 +111,8 @@ def _buscar() -> Dict[str, Any]:
         como = "mi buscador propio (SearXNG)"
     elif _hay_metabuscador():
         como = "varios buscadores a la vez"
-    elif os.environ.get("CELESTIA_APP_ANDROID") == "1":
+    else:                                  # sin DuckDuckGo (Enzo, 6 oct 2026)
         como = "Wikipedia y fuentes directas (enciende tu SearXNG para buscar de todo)"
-    else:
-        como = "DuckDuckGo y Wikipedia"
     if _hay("TAVILY_API_KEY"):
         como += " + Tavily"
     return {"ok": True, "como": como, "falta": "", "claves": []}

@@ -16,6 +16,12 @@ from .tz import from_ts_usuario
 
 logger = logging.getLogger("celestia_v1")
 
+# La app de Android (celestia_movil/vigilia.py) pone un despertador a la hora del
+# próximo recordatorio: con la pantalla apagada la CPU duerme, y este hilo, que mira
+# cada 20 s, no se enteraba hasta que Enzo volvía a encender el móvil. Recibe la hora
+# (time.time()) del próximo pendiente, o None si no queda ninguno.
+AL_CAMBIAR_PROXIMO = None
+
 
 def parse_reminder_time(s: str) -> Optional[float]:
     """Convierte expresión de tiempo natural a segundos desde ahora.
@@ -83,8 +89,19 @@ class ReminderManager:
         if self._reminders:
             logger.info("Recordatorios pendientes recuperados: %d", len(self._reminders))
 
+    def _avisar_proximo(self) -> None:
+        """Le dice a la app la hora del próximo (llamar con el lock cogido)."""
+        gancho = AL_CAMBIAR_PROXIMO
+        if gancho is None:
+            return
+        try:
+            gancho(min((r["at"] for r in self._reminders), default=None))
+        except Exception as e:                 # sin despertador, se sigue mirando cada 20 s
+            logger.debug("Despertador de recordatorios: %s", e)
+
     def _guardar(self) -> None:
         """Escribe los pendientes (llamar con el lock cogido)."""
+        self._avisar_proximo()
         if not self._archivo:
             return
         try:
@@ -96,6 +113,8 @@ class ReminderManager:
             logger.warning("No pude guardar los recordatorios: %s", e)
 
     def start(self) -> None:
+        with self._lock:
+            self._avisar_proximo()             # los que vinieron del disco
         self._thread.start()
 
     def stop(self) -> None:

@@ -7,8 +7,11 @@
 # Google para empaquetar APK no existen para ARM, así que en el móvil no se puede.
 # Antes de `briefcase`, `android/preparar.py` copia aquí el código de Celestia.
 #
-# Lo que todavía NO hace (v1): manejar el móvil (Shizuku), jugar al ZZZ, ni
-# seguir viva con la app cerrada — Android la congela al salir.
+# Sigue viva con la app cerrada (12 oct 2026): un servicio en primer plano con
+# su notificación fija (celestia_movil/servicio.py) y despierta al móvil para
+# sus encargos y recordatorios (celestia_movil/vigilia.py).
+#
+# Lo que todavía NO hace: manejar el móvil (Shizuku).
 
 [tool.briefcase]
 project_name = "Celestia"
@@ -89,13 +92,27 @@ build_gradle_dependencies = [
 ]
 # Clases de Java escritas en Python que Chaquopy genera al fabricar:
 # - la de toga, para poder decidir qué enlace se abre dentro y cuál fuera;
-# - la nuestra (celestia_movil/cromo.py): micrófono y «+» en el chat.
+# - las nuestras: micrófono y «+» en el chat (celestia_movil/cromo.py), y el
+#   servicio que la mantiene viva y su despertador (celestia_movil/servicio.py).
 build_gradle_extra_content = """
-chaquopy.defaultConfig.staticProxy("toga_android.widgets.internal.webview", "celestia_movil.cromo")
+chaquopy.defaultConfig.staticProxy("toga_android.widgets.internal.webview", "celestia_movil.cromo", "celestia_movil.servicio")
 """
 # El chat se sirve en http://127.0.0.1 dentro del propio móvil: sin esto,
 # Android (9+) no deja a la vista web cargar http en claro.
 android_manifest_application_attrs_extra_content = 'android:usesCleartextTraffic="true"'
+# El servicio que la mantiene viva con la app cerrada. «specialUse»: ninguno de
+# los tipos con nombre describe un asistente que espera a que le hablen (Android
+# 14+ pide decir cuál y por qué).
+android_manifest_application_extra_content = """
+<service
+    android:name="celestia_movil.servicio.ServicioCelestia"
+    android:exported="false"
+    android:foregroundServiceType="specialUse">
+    <property
+        android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+        android:value="Asistente personal: sigue encendido para avisar de recordatorios y terminar encargos con la app cerrada" />
+</service>
+"""
 
 [tool.briefcase.app.celestia_movil.android.permission]
 "android.permission.INTERNET" = {}
@@ -105,3 +122,14 @@ android_manifest_application_attrs_extra_content = 'android:usesCleartextTraffic
 # Las notas de voz del chat (la vista web pide el micrófono; cromo.py).
 "android.permission.RECORD_AUDIO" = {}
 "android.permission.MODIFY_AUDIO_SETTINGS" = {}
+# Seguir viva con la app cerrada (celestia_movil/servicio.py).
+"android.permission.FOREGROUND_SERVICE" = {}
+"android.permission.FOREGROUND_SERVICE_SPECIAL_USE" = {}
+"android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" = {}
+# Despertar al móvil para encargos y recordatorios (celestia_movil/vigilia.py):
+# la CPU mientras trabaja, y un despertador exacto a la hora de cada
+# recordatorio. USE_EXACT_ALARM (Android 13+) lo concede Android solo a las apps
+# de recordatorios; SCHEDULE_EXACT_ALARM, en Android 12.
+"android.permission.WAKE_LOCK" = {}
+"android.permission.USE_EXACT_ALARM" = {}
+"android.permission.SCHEDULE_EXACT_ALARM" = {}

@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import hmac
 import json
+import secrets
+import socket
 import threading
 import time
 import urllib.error
@@ -47,10 +49,17 @@ CARCASA_PUBLICA = frozenset({
     "/app/insignia.png",
 })
 
+#: Con lo que la puerta marca lo que reenvía tras mirar la llave. La API
+#: sólo deja mandar sin llave a una web de fuera si trae esta marca: que
+#: diga ser la de GitHub del dueño no basta, cualquier página del aparato
+#: puede llamar a la API directamente.
+MARCA = "X-Celestia-Puerta"
+
 #: Cabeceras que no se reenvían (hop-by-hop, identificativas o la llave).
 SALTAR_CABECERAS = frozenset({
     "host",
     "x-celestia-token",
+    MARCA.lower(),
     "content-length",
     "connection",
     "keep-alive",
@@ -83,6 +92,8 @@ class PuertaPublica:
         self.charlar = charlar
         self.api_privada = api_privada.rstrip("/")
         self.llave = llave or ""
+        # Secreto de este arranque: no se guarda en ningún sitio.
+        self.marca = secrets.token_urlsafe(32)
         self.origenes = tuple(origenes)
         self.puerto = puerto
         self.limite_por_ip = limite_por_ip
@@ -140,9 +151,12 @@ class _Manejador(BaseHTTPRequestHandler):
         pass
 
     _OCUPADA = b'{"error": "ocupada"}'
+    # Lo más que se espera, ya contestado el 503, a recoger lo que mandó.
+    _VACIAR_S = 0.25
 
     def handle(self):
-        """Un hueco por conexión; sin hueco, 503 al momento y sin leer nada.
+        """Un hueco por conexión; sin hueco, 503 al momento y sin interpretar
+        la petición.
 
         El plazo de lectura lo pone `timeout` (StreamRequestHandler lo aplica
         al socket) y `handle_one_request` cierra la conexión al vencer, sin
@@ -155,6 +169,7 @@ class _Manejador(BaseHTTPRequestHandler):
                     b"Content-Type: application/json\r\n"
                     b"Content-Length: " + str(len(self._OCUPADA)).encode() + b"\r\n"
                     b"Connection: close\r\n\r\n" + self._OCUPADA)
+                self._vaciar_antes_de_cerrar()
             except OSError:
                 pass
             return
@@ -164,6 +179,20 @@ class _Manejador(BaseHTTPRequestHandler):
             pass
         finally:
             self.puerta._huecos.release()
+
+    def _vaciar_antes_de_cerrar(self):
+        """Cerrar con la petición aún en el búfer manda un RST, y el RST borra
+        el 503 que el cliente no ha leído todavía (en Windows, WinError
+        10053): la visita veía un error de conexión en vez de «ocupada». Se
+        cierra el lado de escribir y se tira lo que vaya llegando, con un
+        plazo corto para que una conexión lenta no retenga el hilo."""
+        conexion = self.connection
+        conexion.shutdown(socket.SHUT_WR)
+        limite = time.monotonic() + self._VACIAR_S
+        while (queda := limite - time.monotonic()) > 0:
+            conexion.settimeout(queda)
+            if not conexion.recv(65536):
+                break                                # el cliente ya cerró
 
     # ------------------------------------------------------------------
     # Respuestas
@@ -397,6 +426,8 @@ class _Manejador(BaseHTTPRequestHandler):
             if bajo.startswith("x-forwarded-") or bajo.startswith("cf-"):
                 continue
             peticion.add_header(nombre, valor)
+        # Sólo se llega aquí con la llave buena (`_con_llave`).
+        peticion.add_header(MARCA, self.puerta.marca)
 
         try:
             with urllib.request.urlopen(peticion, timeout=ESPERA_API) as respuesta:

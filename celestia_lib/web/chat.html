@@ -927,6 +927,61 @@ body.visita #pestanas { display: none; }
 }
 .datos-perfil dt { color: var(--texto-tenue); }
 .datos-perfil dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
+
+/* ── Estilos del panel «Trabajando» ── */
+/* Colores por variable y no a mano: en el tema claro el cian y el verde de
+   noche no se leen sobre blanco. */
+.trabajo{align-self:stretch;margin:6px 0 10px;background:var(--superficie-alta);border:1px solid var(--borde);
+  border-radius:16px;padding:12px 13px;font-size:13.5px}
+.trabajo .t-cab{display:flex;align-items:center;gap:8px;margin-bottom:8px;cursor:pointer}
+.trabajo .t-cab b{font-weight:600}
+.trabajo .t-tiempo{margin-left:auto;color:var(--texto-tenue);font-size:12px;font-variant-numeric:tabular-nums}
+.trabajo .t-latido{width:9px;height:9px;border-radius:50%;flex:none;background:var(--c-cian);animation:t-late 1.4s infinite}
+.trabajo.fin .t-latido{animation:none;background:var(--c-aurora)}
+.trabajo.mal .t-latido,.trabajo.parado .t-latido{animation:none;background:var(--c-carmin)}
+@keyframes t-late{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--c-cian) 50%,transparent)}
+  70%{box-shadow:0 0 0 8px transparent}100%{box-shadow:0 0 0 0 transparent}}
+.trabajo .t-ahora{border:1px solid var(--borde);border-radius:10px;padding:7px 10px;margin-bottom:9px;color:var(--c-cian)}
+.trabajo.fin .t-ahora,.trabajo.mal .t-ahora,.trabajo.parado .t-ahora{color:var(--texto)}
+.trabajo .t-plan,.trabajo .t-pasos{list-style:none;margin:0 0 8px;padding:0}
+.trabajo .t-plan li,.trabajo .t-pasos li{display:flex;gap:8px;align-items:flex-start;padding:2px 0;color:var(--texto-tenue)}
+.trabajo .t-plan li.hecho{color:var(--texto)}.trabajo .t-plan li.en{color:var(--c-cian)}
+.trabajo .t-pasos{border-top:1px solid var(--borde);padding-top:7px}
+.trabajo .t-h{color:var(--texto-apagado);min-width:38px;font-variant-numeric:tabular-nums}
+.trabajo svg{width:14px;height:14px;flex:none;margin-top:3px}
+.trabajo .ok{color:var(--c-aurora)}.trabajo .malo{color:var(--c-carmin)}.trabajo .fix{color:var(--c-ambar)}
+.trabajo .sin{color:var(--texto-apagado)}
+.trabajo .t-detalle{white-space:pre-wrap;font:12px/1.45 ui-monospace,monospace;background:var(--fondo);
+  border-radius:8px;padding:8px;margin:4px 0 6px;max-height:240px;overflow:auto;display:none}
+.trabajo.tecnico .t-detalle{display:block}
+.trabajo .t-vista{border:1px solid var(--borde);border-radius:12px;overflow:hidden;margin-top:8px}
+.trabajo .t-vista iframe{width:100%;height:260px;border:0;background:#fff;display:block}
+.trabajo .t-vista p{margin:0;padding:10px;color:var(--texto-tenue);font-size:12px}
+.trabajo .t-botones{display:flex;gap:8px;margin-top:9px}
+.trabajo .t-botones button{flex:1;background:transparent;color:var(--texto);border:1px solid var(--borde);
+  border-radius:10px;padding:7px;font:inherit;font-size:12.5px;cursor:pointer}
+.trabajo .t-parar{color:var(--c-carmin)}
+/* Plegado (al terminar): se queda la cabecera y el resultado; tocar la
+   cabecera lo abre para repasar cómo lo hizo. */
+.trabajo.plegado .t-plan,.trabajo.plegado .t-pasos,.trabajo.plegado .t-vista,
+.trabajo.plegado .t-detalle{display:none}
+.trabajo.plegado .t-ahora{margin-bottom:0}
+.trabajo.reconectando .t-tiempo::after{content:" · reconectando…"}
+#t-lateral{display:none}
+#t-lateral .t-volver{display:none;background:transparent;color:var(--texto);border:1px solid var(--borde);
+  border-radius:10px;padding:7px 12px;font:inherit;font-size:13px;cursor:pointer;margin-bottom:10px}
+body.t-ampliado #t-lateral .t-volver{display:inline-block}
+@media (min-width:1100px){
+  body.con-lateral #t-lateral{display:block;position:fixed;top:0;right:0;bottom:0;width:min(46vw,620px);
+    overflow:auto;padding:16px;background:var(--superficie);border-left:1px solid var(--borde);z-index:30}
+  /* El chat entero (cabecera, pestañas, hilo y caja) vive en #app: se aparta. */
+  body.con-lateral #app{margin-right:min(46vw,620px)}
+  .trabajo .t-ampliar{display:none}
+}
+body.t-ampliado #t-lateral{display:block;position:fixed;inset:0;overflow:auto;padding:14px;background:var(--fondo);z-index:40}
+#t-lateral .trabajo{margin:0}#t-lateral .t-vista iframe{height:420px}
+body.espectador #app > footer{display:none}
+@media (prefers-reduced-motion:reduce){.trabajo .t-latido{animation:none}}
 </style>
 </head>
 <body>
@@ -2218,7 +2273,10 @@ function pintar(quien, texto, extra = {}) {
     div.appendChild(meta);
   }
 
+  // Para colocar las tarjetas del panel «Trabajando» en su sitio del hilo.
+  div.dataset.ts = String(extra.ts || Date.now());
   el.hilo.insertBefore(div, el.pensando);
+  if (quien === "ella") recolocarTrabajos();
   abajo();
   return div;
 }
@@ -2326,6 +2384,8 @@ async function enviar(texto) {
   orbe.latir(1);
   abajo();
   sonda = setInterval(mirarActividad, 420);
+  // Un encargo largo abre su cuaderno mientras se contesta: la tarjeta sale ya.
+  const sondaTrabajos = setInterval(() => buscarTrabajos(true), 1500);
 
   try {
     if (VISITA && token()) { location.reload(); return; }
@@ -2416,6 +2476,8 @@ async function enviar(texto) {
   } finally {
     esperando = false;
     clearInterval(sonda); sonda = null;
+    clearInterval(sondaTrabajos);
+    buscarTrabajos(true);
     el.pensando.classList.remove("activo");
     pintarBotonAccion();
     setTimeout(() => { if (!esperando) { ponEstado("reposo"); saludarEstado(); } }, 700);
@@ -2426,6 +2488,11 @@ async function enviar(texto) {
 /* ── Lo que Celestia deja por su cuenta ───────────────────────────────────── */
 async function recogerPendientes() {
   if (esperando || VISITA) return;             // no cortarle la respuesta
+  // El espectador sólo mira: recoger BORRA la bandeja, y se llevaría el PDF o el
+  // «listo» que esperan el chat del dueño (o el examen de nivel). Se mira la URL
+  // y no ESPECTADOR, que se declara más abajo y aún no existe en el arranque.
+  const url = new URLSearchParams(location.search);
+  if (url.get("espectador") || url.get("seguir") === "ultimo") return;
   try {
     const r = await api(`/pendientes?para=${CANAL}`, {ms: 12000});
     const msgs = r.mensajes || [];
@@ -2578,6 +2645,7 @@ function ponTema(nombre) {
    Borrar de verdad es cosa de la lista (mantener pulsado), que es donde se ve
    lo que se va a perder antes de perderlo. */
 function vaciarVista(suave = false) {
+  pararSeguimientos();
   const viejos = el.hilo.querySelectorAll(".msg");
   if (!suave || QUIETO) {
     viejos.forEach(m => m.remove());
@@ -2820,6 +2888,7 @@ async function abrirChat(id) {
   // Aquí NO se hace scroll suave: venir animando desde arriba una conversación
   // que se acaba de abrir marea y tarda. Se aparece ya al final.
   requestAnimationFrame(() => alFinal(true));
+  buscarTrabajos(false);
 }
 
 /* ── Los dos selectores de idioma ────────────────────────────────────────
@@ -4438,6 +4507,356 @@ function fotograma(ahora) {
   setInterval(saludarEstado, 30000);
   if (innerWidth > 620) el.texto.focus();
 })();
+
+/* ── Panel «Trabajando» ──────────────────────────────────────────────────
+   Ver a Celestia trabajar en directo (docs/superpowers/specs/2026-10-05-panel-
+   trabajando-design.md). Sólo pinta lo que hay en el cuaderno del servidor:
+   el panel nunca se inventa nada. Textos con textContent: los escribe un modelo.
+   Va detrás del arranque a propósito: lo de abajo lee VISITA, que se fija ahí. */
+const TRABAJOS = new Map();
+const PARAMS_URL = new URLSearchParams(location.search);
+const ESPECTADOR = PARAMS_URL.get("espectador") || (PARAMS_URL.get("seguir") === "ultimo" ? "ultimo" : "");
+const ANCHO_LATERAL = 1100;
+const EN_ESTE_APARATO = !EN_PAGES && ["127.0.0.1", "localhost", "::1", "[::1]"].includes(location.hostname);
+const VIVOS = ["trabajando", "atascado"];
+const ID_TRABAJO = /^\d{14}[0-9a-f]{6}$/;          // el mismo formato que trabajo.py
+const ICONO = {
+  ok:   '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 8.5l3 3 7-7"/></svg>',
+  malo: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg>',
+  fix:  '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M13 5a5 5 0 1 0 0 6M13 2v3h-3"/></svg>',
+  sin:  '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 8h8"/></svg>',
+  en:   '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="8" cy="8" r="5" stroke-dasharray="20 12"/></svg>',
+  pend: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="8" cy="8" r="5"/></svg>',
+  paso: '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="8" cy="8" r="2"/></svg>',
+};
+const TEXTO_ESTADO = {
+  terminado: "Hecho", parado: "Parado por ti", error: "Se ha quedado a medias por un error",
+  interrumpido: "Se interrumpió aquí", atascado: "Parece atascada",
+};
+
+function icono(nombre, clase) {
+  const s = document.createElement("span");
+  s.className = clase || "";
+  s.innerHTML = ICONO[nombre];
+  return s;
+}
+function linea(padre, piezas) {
+  const li = document.createElement("li");
+  for (const p of piezas) li.append(p);
+  padre.appendChild(li);
+  return li;
+}
+function textoEn(etiqueta, texto, clase) {
+  const n = document.createElement(etiqueta);
+  if (clase) n.className = clase;
+  n.textContent = texto;
+  return n;
+}
+function mmss(seg) {
+  const s = Math.max(0, Math.round(seg || 0));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+function horaDe(t) {
+  return new Date(t * 1000).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
+}
+
+// `todos`: de cualquier chat. Se arranca siempre en uno nuevo, así que al
+// recargar o abrirlo en otro aparato hay que buscar lo que ya está en marcha.
+async function buscarTrabajos(soloActivos = true, todos = false) {
+  if (VISITA) return;
+  try {
+    const hilo = todos || ESPECTADOR === "ultimo" ? "" : `hilo=${encodeURIComponent(hiloActual)}&`;
+    const r = await api(`/trabajos?${hilo}${soloActivos ? "activos=1" : ""}`, {ms: 8000});
+    const lista = (r.trabajos || []).slice().reverse();          // del más viejo al más nuevo
+    for (const t of lista) seguirTrabajo(t.id, {plegado: !VIVOS.includes(t.estado), inicio: t.inicio});
+  } catch { /* sin conexión: el siguiente intento lo recoge */ }
+}
+
+function seguirTrabajo(id, {plegado = false, inicio = 0} = {}) {
+  // El id puede venir de la URL (?espectador=…): con otra forma no se usa,
+  // que «../hilos/x» haría pedir otra ruta con la llave.
+  if (!ID_TRABAJO.test(id) || TRABAJOS.has(id)) return;
+  const nodo = document.createElement("div");
+  nodo.className = "trabajo" + (plegado ? " plegado" : "");
+  const tj = {id, url: `/trabajos/${encodeURIComponent(id)}`, desde: 0, eventos: [], datos: null,
+              nodo, temporizador: null};
+  TRABAJOS.set(id, tj);
+  // Uno ya acabado, en su sitio de la conversación (tras el último mensaje
+  // anterior a su inicio); el que trabaja, abajo, que es lo que está pasando.
+  const posterior = plegado && inicio ? [...el.hilo.querySelectorAll(".msg")]
+    .find(m => Number(m.dataset.ts || 0) > inicio * 1000) : null;
+  el.hilo.insertBefore(nodo, posterior || el.pensando);
+  refrescarTrabajo(tj);
+}
+
+// La tarjeta de un encargo en marcha va debajo de lo último que ha dicho
+// Celestia: la respuesta («voy a construirlo…») llega después de abrirse.
+function recolocarTrabajos() {
+  for (const tj of TRABAJOS.values()) {
+    if (tj.vivo && tj.nodo.nextElementSibling !== el.pensando) el.hilo.insertBefore(tj.nodo, el.pensando);
+  }
+}
+
+async function refrescarTrabajo(tj) {
+  clearTimeout(tj.temporizador);
+  let r;
+  try {
+    r = await api(`${tj.url}?desde=${tj.desde}`, {ms: 8000});
+  } catch {
+    if (TRABAJOS.get(tj.id) !== tj) return;
+    tj.nodo.classList.add("reconectando");
+    tj.temporizador = setTimeout(() => refrescarTrabajo(tj), 2000);
+    return;
+  }
+  // Mientras volvía la respuesta se ha cambiado de chat: esta tarjeta ya no está.
+  if (TRABAJOS.get(tj.id) !== tj) return;
+  tj.nodo.classList.remove("reconectando");
+  for (const e of r.eventos || []) if (e.n > tj.desde) tj.eventos.push(e);
+  tj.desde = r.ultimo;
+  tj.datos = r;
+  const vivo = VIVOS.includes(r.estado);
+  // Al acabar delante de ti se pliega y el lateral se recoge (salvo que lo
+  // estés mirando ampliado); uno que ya venía acabado se queda como esté.
+  if (tj.vivo && !vivo) {
+    tj.nodo.classList.add("plegado");
+    if (document.body.dataset.lateral === tj.id && !document.body.classList.contains("t-ampliado")) cerrarLateral();
+  }
+  tj.vivo = vivo;
+  pintarTrabajo(tj);
+  if (vivo) tj.temporizador = setTimeout(() => refrescarTrabajo(tj), 700);
+  else if (ESPECTADOR === "ultimo") setTimeout(() => buscarTrabajos(true), 2000);
+}
+
+function textoDePaso(e) {
+  if (e.tipo === "comprobacion") {
+    return e.ok === null ? `${e.que} — sin comprobar` : e.ok ? e.que : `${e.que}: ${e.motivo || "falla"}`;
+  }
+  if (e.tipo === "archivo") return `Escribo ${e.ruta}${e.lineas ? ` (${e.lineas} líneas)` : ""}`;
+  return e.texto;
+}
+function iconoDePaso(e) {
+  if (e.tipo === "comprobacion") {
+    return e.ok === true ? icono("ok", "ok") : e.ok === false ? icono("malo", "malo") : icono("sin", "sin");
+  }
+  return e.tipo === "correccion" ? icono("fix", "fix") : icono("paso");
+}
+
+/* Lo que se repinta en cada vuelta (cabecera, ahora, plan, pasos y botones)
+   y, aparte, la vista previa: un iframe que se rehace recarga y sale en blanco. */
+function construir(tj, completo) {
+  const d = tj.datos, ev = tj.eventos;
+  const vivo = VIVOS.includes(d.estado);
+  const cuerpo = [];
+  // Cabecera: latido, título y tiempo. Tocarla pliega o abre la tarjeta.
+  const cab = document.createElement("div");
+  cab.className = "t-cab";
+  cab.append(textoEn("span", "", "t-latido"), textoEn("b", d.titulo || "Trabajando"),
+             textoEn("span", mmss(d.segundos), "t-tiempo"));
+  if (!completo) {
+    cab.setAttribute("role", "button");
+    cab.tabIndex = 0;
+    cab.setAttribute("aria-expanded", String(!tj.nodo.classList.contains("plegado")));
+    const plegar = () => { tj.nodo.classList.toggle("plegado"); pintarTrabajo(tj); };
+    cab.onclick = plegar;
+    cab.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); plegar(); } };
+  }
+  cuerpo.push(cab);
+  // Ahora (o cómo acabó): lo último que ha hecho, sea un paso, un archivo o una comprobación.
+  const pasos = ev.filter(e => ["paso", "archivo", "comprobacion", "correccion"].includes(e.tipo));
+  const ultimoPaso = [...pasos].pop();
+  const fin = ev.find(e => e.tipo === "fin");
+  // Al terminar: «Hecho: Web lista · 9 comprobaciones, 1 corregida».
+  const nComp = ev.filter(e => e.tipo === "comprobacion").length;
+  const nCorr = ev.filter(e => e.tipo === "correccion").length;
+  const cuenta = nComp ? ` · ${nComp} comprobaci${nComp > 1 ? "ones" : "ón"}` +
+                         (nCorr ? `, ${nCorr} corregida${nCorr > 1 ? "s" : ""}` : "") : "";
+  const ahora = vivo ? (d.estado === "atascado" ? TEXTO_ESTADO.atascado : (ultimoPaso ? textoDePaso(ultimoPaso) : "Empezando…"))
+                     : `${TEXTO_ESTADO[d.estado] || "Hecho"}${fin && fin.resultado ? ": " + fin.resultado : ""}${cuenta}`;
+  cuerpo.push(textoEn("div", ahora, "t-ahora"));
+  // El plan con su avance.
+  const plan = [...ev].reverse().find(e => e.tipo === "plan");
+  if (plan) {
+    const etapa = Math.max(-1, ...ev.filter(e => e.tipo === "etapa").map(e => e.indice));
+    const ul = document.createElement("ul");
+    ul.className = "t-plan";
+    plan.pasos.forEach((p, i) => {
+      const estado = d.estado === "terminado" ? "hecho" : i < etapa ? "hecho" : i === etapa && vivo ? "en" : "pend";
+      const li = linea(ul, [icono(estado === "hecho" ? "ok" : estado, estado === "hecho" ? "ok" : ""), p]);
+      li.className = estado;
+    });
+    cuerpo.push(ul);
+  }
+  // Los pasos (los últimos 5 en la tarjeta; todos en el lateral o ampliado).
+  const ul = document.createElement("ul");
+  ul.className = "t-pasos";
+  for (const e of completo ? pasos : pasos.slice(-5)) {
+    const li = linea(ul, [textoEn("span", horaDe(e.t), "t-h"), iconoDePaso(e), textoEn("span", textoDePaso(e))]);
+    if (e.detalle) li.after(textoEn("pre", e.detalle, "t-detalle"));
+  }
+  cuerpo.push(ul);
+  // Botones.
+  const botones = [];
+  const tecnico = textoEn("button", "Ver detalle técnico");
+  tecnico.onclick = () => { tj.nodo.classList.toggle("tecnico"); pintarTrabajo(tj); };
+  botones.push(tecnico);
+  if (!completo) {
+    const amp = textoEn("button", "Ampliar", "t-ampliar");
+    amp.onclick = () => abrirLateral(tj, true);
+    botones.push(amp);
+  }
+  if (vivo && !ESPECTADOR) {
+    const parar = textoEn("button", tj.parando ? "Parando…" : "Parar", "t-parar");
+    parar.disabled = !!tj.parando;
+    // Por el estado y no por el nodo: al igualar se queda el botón que ya estaba.
+    parar.onclick = async () => {
+      tj.parando = true;
+      pintarTrabajo(tj);
+      try { await api(`${tj.url}/parar`, {metodo: "POST", ms: 8000}); }
+      catch { tj.parando = false; pintarTrabajo(tj); }
+    };
+    botones.push(parar);
+  }
+  const vista = [...ev].reverse().find(e => e.tipo === "vista_previa") || null;
+  return {cuerpo, vista, botones};
+}
+
+// La vista previa (sólo en el aparato donde trabaja Celestia). Se rehace
+// únicamente cuando hay una nueva (`?v=` es el número del suceso).
+function ponerVista(hueco, tj, vista) {
+  const src = vista
+    ? `${API_BASE}${tj.url}/vista/${vista.ruta.split("/").map(encodeURIComponent).join("/")}?v=${vista.n}`
+    : "";
+  if (hueco.dataset.src === src) return;
+  hueco.dataset.src = src;
+  if (!src) { hueco.replaceChildren(); return; }
+  const v = document.createElement("div");
+  v.className = "t-vista";
+  if (EN_ESTE_APARATO) {
+    const f = document.createElement("iframe");
+    f.setAttribute("sandbox", "allow-scripts");
+    f.title = "Vista previa";
+    f.src = src;
+    v.appendChild(f);
+  } else {
+    v.appendChild(textoEn("p", "La vista previa se ve en el aparato donde trabaja Celestia."));
+  }
+  hueco.replaceChildren(v);
+}
+
+/* Deja `viejo` igual que `nuevo` tocando sólo lo que cambia. Se repinta cada
+   0,7 s: un botón rehecho entre que se pulsa y se suelta se traga el clic, y
+   un detalle técnico rehecho pierde por dónde lo ibas leyendo. */
+function igualar(viejo, nuevo) {
+  const a = [...viejo.childNodes], b = [...nuevo.childNodes];
+  b.forEach((n, i) => {
+    const v = a[i];
+    if (!v) viejo.appendChild(n);
+    else if (v.isEqualNode(n)) { if (v.nodeType === 1) { v.onclick = n.onclick; v.onkeydown = n.onkeydown; } }
+    else if (v.nodeType === 3 && n.nodeType === 3) v.data = n.data;
+    else if (v.nodeType === 1 && v.tagName === n.tagName && v.tagName !== "IFRAME") {
+      for (const at of [...v.attributes]) if (!n.hasAttribute(at.name)) v.removeAttribute(at.name);
+      for (const at of [...n.attributes]) if (v.getAttribute(at.name) !== at.value) v.setAttribute(at.name, at.value);
+      v.onclick = n.onclick;
+      v.onkeydown = n.onkeydown;
+      igualar(v, n);
+    } else viejo.replaceChild(n, v);
+  });
+  for (const v of a.slice(b.length)) v.remove();
+}
+
+// Una tarjeta (y el lateral) son tres huecos fijos: lo que cambia, la vista y los botones.
+function montar(caja, tj, completo, conVista = true) {
+  if (caja.childElementCount !== 3 || !caja.firstElementChild.classList.contains("t-cuerpo")) {
+    const cuerpo = document.createElement("div");
+    cuerpo.className = "t-cuerpo";
+    const hueco = document.createElement("div");
+    const bot = document.createElement("div");
+    bot.className = "t-botones";
+    caja.replaceChildren(cuerpo, hueco, bot);
+  }
+  const [cuerpo, hueco, bot] = caja.children;
+  const partes = construir(tj, completo);
+  const nuevoCuerpo = document.createElement("div"), nuevosBotones = document.createElement("div");
+  nuevoCuerpo.append(...partes.cuerpo);
+  nuevosBotones.append(...partes.botones);
+  igualar(cuerpo, nuevoCuerpo);
+  ponerVista(hueco, tj, conVista ? partes.vista : null);
+  igualar(bot, nuevosBotones);
+}
+
+function pintarTrabajo(tj) {
+  const d = tj.datos;
+  if (!d) return;
+  tj.nodo.classList.toggle("fin", d.estado === "terminado");
+  tj.nodo.classList.toggle("parado", d.estado === "parado");
+  tj.nodo.classList.toggle("mal", ["error", "interrumpido"].includes(d.estado));
+  // En pantalla ancha, el que trabaja se pone solo a la derecha (si no hay otro).
+  if (VIVOS.includes(d.estado) && window.innerWidth >= ANCHO_LATERAL && !document.body.dataset.lateral) {
+    ponerLateral(tj.id);
+  }
+  const enLateral = document.body.dataset.lateral === tj.id;
+  // Con el lateral abierto la tarjeta es el resumen: la vista previa va al lado.
+  montar(tj.nodo, tj, false, !enLateral);
+  if (enLateral) {
+    const lat = $("#t-lateral");
+    let dentro = lat.querySelector(":scope > .trabajo");
+    if (!dentro || dentro.dataset.id !== tj.id) {
+      const atras = textoEn("button", "Volver al chat", "t-volver");
+      atras.onclick = () => history.back();
+      dentro = document.createElement("div");
+      dentro.dataset.id = tj.id;
+      lat.replaceChildren(atras, dentro);
+    }
+    dentro.className = "trabajo" + ["tecnico", "fin", "parado", "mal"]
+      .filter(c => tj.nodo.classList.contains(c)).map(c => " " + c).join("");
+    montar(dentro, tj, true);
+  }
+}
+
+function ponerLateral(id) {
+  document.body.dataset.lateral = id;
+  document.body.classList.add("con-lateral");
+}
+function abrirLateral(tj, ampliar) {
+  ponerLateral(tj.id);
+  if (ampliar && !document.body.classList.contains("t-ampliado")) {
+    document.body.classList.add("t-ampliado");
+    history.pushState({tAmpliado: true}, "");
+  }
+  pintarTrabajo(tj);
+}
+function cerrarLateral() {
+  delete document.body.dataset.lateral;
+  document.body.classList.remove("con-lateral", "t-ampliado");
+  $("#t-lateral").replaceChildren();
+}
+window.addEventListener("popstate", () => {
+  if (!document.body.classList.contains("t-ampliado")) return;
+  document.body.classList.remove("t-ampliado");
+  const tj = TRABAJOS.get(document.body.dataset.lateral);
+  // En el ordenador, el que sigue trabajando se queda a la derecha.
+  if (window.innerWidth < ANCHO_LATERAL || !tj || !VIVOS.includes(tj.datos?.estado)) cerrarLateral();
+  if (tj) pintarTrabajo(tj);          // la tarjeta recupera su vista previa
+});
+
+function pararSeguimientos() {
+  // vaciarVista() sólo borra los `.msg`: las tarjetas se quitan aquí.
+  for (const tj of TRABAJOS.values()) { clearTimeout(tj.temporizador); tj.nodo.remove(); }
+  TRABAJOS.clear();
+  if (document.body.classList.contains("t-ampliado")) history.back();
+  cerrarLateral();
+}
+
+if (ESPECTADOR) {
+  // Sólo mirar: sin caja de escribir (el footer; #pie es el «conectado»).
+  document.body.classList.add("espectador");
+  // Hora 1 (1970): el aviso va siempre arriba, y las tarjetas debajo.
+  pintar("nota", "Modo espectador: sigues a Celestia trabajando, sin poder escribir.", {ts: 1});
+  if (ESPECTADOR === "ultimo") { buscarTrabajos(true); setInterval(() => buscarTrabajos(true), 3000); }
+  else seguirTrabajo(ESPECTADOR);
+} else buscarTrabajos(true, true);
+/* ── fin del panel «Trabajando» ── */
 </script>
+<aside id="t-lateral" aria-label="Celestia trabajando"></aside>
 </body>
 </html>

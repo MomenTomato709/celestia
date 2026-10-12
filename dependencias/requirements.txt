@@ -24,7 +24,10 @@ edge-tts>=6.1.0           # TTS principal (online)
 flask>=3.0,<4.0
 
 # ── App instalable: avisos push con la app cerrada ──
-pywebpush>=2.5.0
+# 2.4 y py-vapid 1.9.3 piden cryptography>=46-47, y aquí va <45 (la del móvil, 43):
+# con «>=2.5.0» una instalación nueva no podía cumplir las dos (12 oct 2026).
+pywebpush>=2.0,<2.4
+py-vapid>=1.9,<1.9.3
 
 # ── Crypto (vault de contraseñas) ──────────────
 cryptography>=42.0,<45.0

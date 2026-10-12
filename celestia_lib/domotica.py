@@ -7,12 +7,13 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from .paths import MEM_DIR, ROOT, SKILLS_DIR
+from .paths import MEM_DIR, ROOT, SIN_VENTANA, SKILLS_DIR, entorno_de_scripts, python_de_scripts
 
 logger = logging.getLogger("celestia_v1")
 
@@ -99,11 +100,14 @@ class DomoticaManager:
     def _ejecutar_skill(self, ruta: str, timeout: int = 15) -> Tuple[bool, str]:
         try:
             res = subprocess.run(
-                ["python3", ruta], capture_output=True, text=True, timeout=timeout
+                [python_de_scripts(), ruta], capture_output=True, text=True, timeout=timeout,
+                encoding="utf-8", errors="replace", env=entorno_de_scripts(os.environ),
+                **SIN_VENTANA,
             )
+            salida, errores = (res.stdout or "").strip(), (res.stderr or "").strip()
             if res.returncode == 0:
-                return True, res.stdout.strip()
-            return False, (res.stderr.strip() or res.stdout.strip())
+                return True, salida
+            return False, (errores or salida)
         except subprocess.TimeoutExpired:
             return False, "Timeout"
         except Exception as e:

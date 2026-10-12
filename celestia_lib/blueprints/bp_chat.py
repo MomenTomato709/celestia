@@ -26,7 +26,7 @@ from pathlib import Path
 
 from flask import Blueprint, Response, jsonify, request as flask_request
 
-from .. import actividad, buzon, marca, push
+from .. import actividad, buzon, documento_abierto, marca, push
 from ..paths import RECIBIDOS_DIR, ROOT
 from ..tools import AgentTools
 
@@ -195,11 +195,10 @@ def _nombre_limpio(nombre: str) -> str:
     """Un nombre de archivo que no pueda salirse de su carpeta.
 
     Lo manda el navegador, así que se le quita todo lo que no sea texto llano:
-    barras, dos puntos y los «..» que permitirían escribir en otro sitio.
+    barras, dos puntos y los «..» que permitirían escribir en otro sitio. Vive en
+    `documento_abierto`, que tiene que encontrar el archivo con el mismo nombre.
     """
-    base = Path(str(nombre or "archivo")).name          # se queda la última parte
-    base = re.sub(r"[^\w.\- ]", "_", base, flags=re.UNICODE).strip(". ")
-    return (base or "archivo")[:80]
+    return documento_abierto.nombre_limpio(nombre)
 
 
 def _extraer_texto(ruta: Path) -> str:
@@ -238,7 +237,7 @@ def _extraer_texto(ruta: Path) -> str:
 _MARCA_RECIBIDO_RE = re.compile(r"\[ARCHIVO RECIBIDO:\s*([^\]\n]+?)\s+—\s+\d+\s+bytes\]")
 
 
-def anexar_archivo_recibido(texto: str) -> str:
+def anexar_archivo_recibido(texto: str, canal: str = "") -> str:
     """Cambia la marca `[ARCHIVO RECIBIDO: …]` por lo que pone el archivo.
 
     Lo mismo que hace el chat web con `/subir`, para los documentos que llegan
@@ -258,6 +257,8 @@ def anexar_archivo_recibido(texto: str) -> str:
             and seguro.is_file()):
         leido = (_extraer_texto(seguro) or "").strip()
     if leido:
+        # Para poder releerlo entero en las preguntas que vengan (documento_abierto).
+        documento_abierto.registrar_subida(seguro, canal or "whatsapp", nombre)
         truncado = len(leido) > MAX_TEXTO_ARCHIVO
         bloque = (f"[CONTENIDO DEL ARCHIVO «{nombre}» QUE ACABAS DE ABRIR"
                   + (" — solo el principio, el archivo sigue" if truncado else "")
@@ -416,6 +417,8 @@ def crear(api) -> Blueprint:
             logger.warning("No pude guardar %s: %s", destino, e)
             return jsonify({"error": f"no pude guardarlo: {e}"}), 500
         texto = (_extraer_texto(seguro) or "").strip()
+        # Subido de verdad por el chat: es lo único que documento_abierto relee entero.
+        documento_abierto.registrar_subida(seguro, "web", nombre)
         truncado = len(texto) > MAX_TEXTO_ARCHIVO
         if truncado:
             texto = texto[:MAX_TEXTO_ARCHIVO]

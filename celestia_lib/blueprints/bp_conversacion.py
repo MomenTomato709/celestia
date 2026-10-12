@@ -22,15 +22,19 @@ from .. import acceso
 from .. import acertijos
 from .. import bandeja
 from .. import buzon
+from .. import documento_abierto
 from .. import empeno
 from .. import formato
 from .. import guias
 from .. import lineas
 from .. import primer_arranque
+from .. import proyecto_existente
+from .. import trabajo
 from ..canales import GestorCanales, detectar_intencion, detectar_token
 from ..tools import AgentTools
 from ..api import _int_seguro
 from ..paths import ROOT
+from . import bp_chat as _bp_chat
 from .bp_chat import anexar_archivo_recibido
 
 logger = logging.getLogger("celestia_v1")
@@ -208,13 +212,29 @@ def crear(api) -> Blueprint:
             return jsonify({"texto": acceso.NO_ERES_TU, "descartado": _motivo})
         if canal_origen:
             bandeja.CANAL_PETICION.set(canal_origen)
+        # Un proyecto de código en un ZIP (chat o WhatsApp): se mira antes de que la
+        # marca de WhatsApp se cambie por «no es texto que puedas leer».
+        _zip_proyecto = proyecto_existente.adjunto(texto_orig, _bp_chat.BUZON)
         # Un documento de WhatsApp llega como una marca con la ruta: se cambia
         # por su contenido para que hable de lo que pone, no de lo que imagina.
-        texto_orig = anexar_archivo_recibido(texto_orig)
+        texto_orig = anexar_archivo_recibido(texto_orig, canal_origen)
         # A qué chat pertenece (sesión 54). El chat web abre uno nuevo cada vez
         # y manda su identificador; quien no diga nada —Termux, WhatsApp— sigue
         # en el hilo de siempre y no nota ningún cambio.
-        api.orch.usar_hilo(data.get("hilo"))
+        _hilo_peticion = api.orch.usar_hilo(data.get("hilo"))
+        # El documento adjunto va APARTE de lo que escribe: los detectores de órdenes
+        # sólo ven sus palabras (una frase del reglamento se tomó por domótica y creó
+        # una habilidad, 6 oct 2026) y el modelo recibe el documento entero —por
+        # trozos si es largo— en este turno y en las preguntas que vengan sobre él.
+        # El hilo, el que devolvió usar_hilo: con dos peticiones a la vez,
+        # `hilo_actual` puede ser ya el de la otra.
+        texto_orig, _doc_anexo = documento_abierto.preparar(
+            texto_orig, _hilo_peticion if isinstance(_hilo_peticion, str) else "",
+            canal=canal_origen)
+        # Lo que va a herramientas que no pasan por la charla (el generador de
+        # proyectos): «créame la app que te describo en el adjunto».
+        _doc_para_herramientas = documento_abierto.para_herramienta(
+            _hilo_peticion if isinstance(_hilo_peticion, str) else "")
         # El buzón es donde ella escribe por su cuenta, y eso no pasaba por la
         # conversación: a «lo quiero más limpio» contestó «¿te refieres al
         # personaje que estamos perfilando?» sobre el calco que acababa de
@@ -257,6 +277,25 @@ def crear(api) -> Blueprint:
         if _resp_clave is not None:
             # `era_clave`: el chat web tapa la burbuja con la clave.
             return jsonify({"texto": _resp_clave, "era_clave": True})
+        # ── Un proyecto que ya existe, en un ZIP ──────────────────────────
+        # Examen de nivel, 11 oct 2026 (arreglar-citas): contestaba «descomprime el zip
+        # y pégame el contenido». Con lo que se pide, se abre, se cambia, se prueba en la
+        # caja y se devuelve; sin decir qué, se dice qué hay y se pregunta.
+        if _zip_proyecto and not imagen_b64:
+            _ruta_zip, _pide = _zip_proyecto
+            if not proyecto_existente.pide_un_cambio(_pide):
+                return jsonify({"texto": proyecto_existente.describir(_ruta_zip)})
+            disp, motivo = api.orch.model.backend_disponible()
+            if not disp:
+                logger.warning("Proyecto existente rechazado — backend no disponible: %s", motivo)
+                return jsonify({"texto": "Ahora mismo no puedo ponerme con tu proyecto "
+                                         "(saturación del modelo). Vuelve a pedírmelo en 1 minuto."})
+            logger.info("Proyecto existente en un ZIP: %s", _ruta_zip.name)
+            trabajo.lanzar(api._modificar_proyecto, str(_ruta_zip), _pide,
+                           titulo=f"Cambiar tu proyecto: {_pide}",
+                           hilo=api.orch.hilo_actual, nombre_hilo="proyecto")
+            return jsonify({"texto": "🔧 Abro tu proyecto, hago los cambios y paso sus pruebas. "
+                                     "Te lo devuelvo como ZIP en cuanto esté (unos minutos)."})
         # Sesión 31 (BUG-S27): texto basura (mismo carácter repetido o
         # sólo caracteres no alfanuméricos). Antes pasaba al LLM que
         # devolvía cuerpo vacío. Ahora respuesta directa.
@@ -720,7 +759,7 @@ def crear(api) -> Blueprint:
 
         # ¿El usuario pide crear un proyecto multi-archivo (sin imagen)?
         if (not imagen_b64 and api._es_peticion_creacion(texto_orig)
-            and len(texto_orig.split()) > 12):
+            and (len(texto_orig.split()) > 12 or _doc_para_herramientas)):
             # No prometer si el backend está caído (Groq throttled sin fallback)
             disp, motivo = api.orch.model.backend_disponible()
             if not disp:
@@ -730,11 +769,10 @@ def crear(api) -> Blueprint:
                     "(saturación del modelo). Vuelve a pedírmelo en 1 minuto."
                 })
             logger.info("Petición de proyecto multi-archivo detectada")
-            threading.Thread(
-                target=api._generar_proyecto_desde_spec,
-                args=(texto_orig, ""),
-                daemon=True,
-            ).start()
+            trabajo.lanzar(api._generar_proyecto_desde_spec, texto_orig,
+                           _doc_para_herramientas,
+                           titulo=f"Proyecto: {texto_orig}",
+                           hilo=api.orch.hilo_actual, nombre_hilo="proyecto")
             return jsonify({"texto":
                 "📐 Voy a construir el proyecto completo (varios archivos coordinados). "
                 "Te lo mando como ZIP en cuanto esté. Tarda 1-3 minutos."
@@ -836,11 +874,9 @@ def crear(api) -> Blueprint:
                             "(modelo saturado). Vuelve a pedírmelo en 1 minuto."
                         })
                     logger.info("Imagen + petición de creación detectada → generando proyecto")
-                    threading.Thread(
-                        target=api._generar_proyecto_desde_spec,
-                        args=(texto_orig, desc),
-                        daemon=True,
-                    ).start()
+                    trabajo.lanzar(api._generar_proyecto_desde_spec, texto_orig, desc,
+                                   titulo=f"Proyecto (desde tu imagen): {texto_orig}",
+                                   hilo=api.orch.hilo_actual, nombre_hilo="proyecto")
                     return jsonify({"texto":
                         "📐 Analicé el boceto. Voy a generar el proyecto completo "
                         "(varios archivos coordinados) y te lo mando como ZIP en cuanto esté. "
@@ -884,7 +920,11 @@ def crear(api) -> Blueprint:
             max_tok = 800 if (imagen_b64 or ctx_pantalla or tool_result) else 400
             # «resúmemelo en 10 párrafos, no te dejes nada» con 400 tokens salía
             # cortado a mitad de palabra. Si lo piden, hay sitio.
-            if PIDE_EXTENSION_RE.search(texto_orig):
+            # Y un correo, una carta o un guion enteros tampoco caben en 400: la
+            # reclamación del examen se cortó a mitad del asunto (7 oct 2026).
+            _pide_texto = getattr(type(api.orch), "_PIDE_UN_TEXTO_RE", None)
+            if PIDE_EXTENSION_RE.search(texto_orig) or (
+                    _pide_texto is not None and _pide_texto.search(texto_orig)):
                 max_tok = max(max_tok, MAX_TOKENS_EXTENSO)
             # Si la respuesta va a salir también en audio, se le dice en el
             # turno. La regla de la capa del prompt no bastaba: a «mándame un
@@ -894,6 +934,9 @@ def crear(api) -> Blueprint:
                 texto = (f"{texto}\n\n[ESTADO INTERNO — VOZ]\nTu respuesta se enviará "
                          "también como nota de voz: el sistema la convierte sola. Contesta "
                          "con lo que dirías en ese audio y NO digas que no puedes mandar audios.")
+            if _doc_anexo:
+                texto = f"{texto}\n\n{_doc_anexo}"
+                max_tok = max(max_tok, 800)
             with api._lock:
                 respuesta = api.orch.respond(texto, stream=False, max_tokens=max_tok)
         respuesta = api._sanitizar_respuesta(respuesta)

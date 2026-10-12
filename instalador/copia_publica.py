@@ -65,7 +65,17 @@ def _git(*args: str, cwd: Path = RAIZ, env: dict | None = None) -> str:
                           text=True, encoding="utf-8", env=env).stdout
 
 
+# Y de lo que va, esto no: el jugador y lo del juego se quedan en el privado.
+# Enzo, 4 oct 2026: «quiero que lo tengamos pero que nadie lo pueda utilizar,
+# sólo yo». Casi todos los juegos prohíben que un programa juegue por ti, y
+# publicarlo le podía perjudicar. Sin ellos, el resto sigue (paths.hay_jugador).
+FUERA = re.compile(r"^celestia_lib/(?:jugador|escuela|aprendiz|explorador|practica_equipo|"
+                   r"botones|escena|zzz|[a-z_]+_zzz)\.py$")
+
+
 def _entra(nombre: str) -> bool:
+    if FUERA.match(nombre):
+        return False
     return any(nombre == i or (i.endswith("/") and nombre.startswith(i)) for i in INCLUIR)
 
 
